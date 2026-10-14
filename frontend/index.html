@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALMA BM010 Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+  <style>
+    :root { --bg:#f5f7fa; --card:#fff; --text:#16202c; --muted:#5d6b7a; --line:#dde3ea; --accent:#0b6bcb; --warn:#c2410c; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0e141b; --card:#17202a; --text:#e7edf3; --muted:#93a1b0; --line:#2a3644; --accent:#5aa9ff; --warn:#fb923c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; }
+    header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    h1 { font-size:20px; margin:0; }
+    select { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+    .label { color:var(--muted); font-size:12px; }
+    .value { font-size:24px; font-weight:600; margin-top:4px; }
+    .unit { font-size:13px; color:var(--muted); font-weight:400; }
+    .chart h2 { font-size:14px; margin:0 0 8px; }
+    .chart { margin-bottom:12px; overflow:hidden; }
+    #status { color:var(--muted); font-size:12px; }
+    #status.error { color:var(--warn); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ALMA BM010 <span class="unit">oscillatiedemping</span></h1>
+    <div>
+      <label class="label" for="minutes">Periode</label>
+      <select id="minutes">
+        <option value="10">laatste 10 min</option>
+        <option value="30">laatste 30 min</option>
+        <option value="60">laatste 60 min</option>
+      </select>
+      <span id="status"></span>
+    </div>
+  </header>
+
+  <section class="grid" id="kpis"></section>
+
+  <div class="card chart"><h2>Torenversnelling (m/s²) &mdash; gearceerd = systeem aan</h2><div id="chart-accel"></div></div>
+  <div class="card chart"><h2>Geschatte kabelspanning (kN)</h2><div id="chart-tension"></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

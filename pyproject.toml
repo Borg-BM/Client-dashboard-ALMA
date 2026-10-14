@@ -1,0 +1,22 @@
+[project]
+name = "alma-dashboard"
+version = "0.1.0"
+description = "BM010 ALMA client dashboard backed by ibaHD-API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "pandas",
+    "numpy",
+]
+
+[project.optional-dependencies]
+ibahd = ["ibahd-api>=1.3.0"]
+dev = ["pytest", "httpx"]
+
+[tool.setuptools]
+packages = ["alma", "alma.sources"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
