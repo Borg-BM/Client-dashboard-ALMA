@@ -5,24 +5,24 @@ import pandas as pd
 
 
 class SourceUnavailable(RuntimeError):
-    """De databron geeft nu geen bruikbare data (server onbereikbaar, kanaal ontbreekt, enz.).
+    """The data source currently returns no usable data (server unreachable, channel missing, etc.).
 
-    De tekst is bedoeld voor de logs en mag geen geheimen bevatten. De API vertaalt dit naar een 503.
+    The text is meant for the logs and must not contain secrets. The API translates this into a 503.
     """
 
 
 class DataSource(Protocol):
-    """Een bron kan daarnaast optioneel hebben (de app gebruikt ze als ze er zijn): retention_minutes (hoe ver
-    terug de bron data heeft, standaard 60), start()/stop() (levenscyclus van de app) en stats() (tellers
-    voor /api/health)."""
+    """A source may optionally also have (the app uses them when present): retention_minutes (how far
+    back the source has data, default 60), start()/stop() (app lifecycle) and stats() (counters
+    for /api/health)."""
 
     name: str
 
     def read(self, start: datetime, end: datetime, max_points: int) -> pd.DataFrame:
-        """Geef data tussen start en end (UTC) terug.
+        """Return data between start and end (UTC).
 
-        Index: UTC DatetimeIndex. Kolommen: de logische signalen uit alma.config.SIGNALS
-        (tower_*/vessel_* in mm, pressure_*_skid1/2 in bar, system_mode als modenummer).
-        Rijen met ontbrekende waarden worden weggelaten. Bij een onbereikbare bron: SourceUnavailable.
+        Index: UTC DatetimeIndex. Columns: the logical signals from alma.config.SIGNALS
+        (tower_*/vessel_* in mm, pressure_*_skid1/2 in bar, system_mode as mode number).
+        Rows with missing values are omitted. For an unreachable source: SourceUnavailable.
         """
         ...

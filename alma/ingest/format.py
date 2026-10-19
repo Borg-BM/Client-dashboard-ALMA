@@ -1,8 +1,8 @@
-"""Het formaat van een UDP-telegram van ibaPDA (Generic UDP-uitvoermodule): welke bytes welk signaal zijn.
+"""The format of a UDP telegram from ibaPDA (Generic UDP output module): which bytes make up which signal.
 
-Een telegram is een momentopname van alle signalen. De signalen staan op vaste offsets, de byte-
-volgorde is instelbaar en een digitaal signaal is een bit in een woord. Het formaat staat in een
-JSON-bestand, zodat een wijziging in ibaPDA geen codewijziging vraagt:
+A telegram is a snapshot of all signals. The signals sit at fixed offsets, the byte order is configurable
+and a digital signal is a bit in a word. The format lives in a JSON file, so a change in ibaPDA does not
+require a code change:
 
     {
       "byte_order": "big",
@@ -17,15 +17,15 @@ JSON-bestand, zodat een wijziging in ibaPDA geen codewijziging vraagt:
       "timestamp": {"source": "receive"}
     }
 
-Offsets tellen vanaf het einde van de header. Een bitveld is bit `bit` (0 = minst significant) van het
-woord op `offset`, gelezen in de byte-volgorde van het formaat; zo adresseert ook ibaPDA digitale
-signalen. Waarde = ruw * scale + bias, en min/max gelden na het schalen. `checks` zijn constante
-woorden die in elk telegram moeten staan: een goedkope poort tegen losse of blind ingespoten pakketten.
+Offsets count from the end of the header. A bit field is bit `bit` (0 = least significant) of the word
+at `offset`, read in the byte order of the format; this is also how ibaPDA addresses digital signals.
+Value = raw * scale + bias, and min/max apply after scaling. `checks` are constant words that must be
+present in every telegram: a cheap gate against stray or blindly injected packets.
 
-Het formaat is bewust streng. Een onbekende sleutel, een byte-volgorde zonder keuze of overlappende
-bytes is een fout bij het laden, want dubbelzinnige bytes geven stil verkeerde waarden. decode() weigert
-op dezelfde manier alles wat niet exact past, en doet per telegram niets zwaarders dan een struct-aanroep
-en wat rekenwerk: het draait voor elk datagram, ook van wie het netwerk bestookt.
+The format is deliberately strict. An unknown key, a missing byte order or overlapping bytes is an error
+at load time, because ambiguous bytes silently produce wrong values. decode() rejects everything that
+does not fit exactly in the same way, and does nothing heavier per telegram than a struct call and a bit
+of arithmetic: it runs for every datagram, including those from whoever is flooding the network.
 """
 
 import json
@@ -39,25 +39,25 @@ from typing import Any, NamedTuple
 
 __all__ = ["MAX_PACKET_BYTES", "Check", "Field", "FormatError", "PacketError", "PacketFormat"]
 
-MAX_PACKET_BYTES = 65507  # grootste UDP-payload over IPv4: 65535 - 8 (UDP-kop) - 20 (IP-kop)
+MAX_PACKET_BYTES = 65507  # largest UDP payload over IPv4: 65535 - 8 (UDP header) - 20 (IP header)
 
 _TOP_KEYS = ("byte_order", "packet_bytes", "header_bytes", "fields", "checks", "timestamp")
 _FIELD_KEYS = ("signal", "offset", "type", "bit", "scale", "bias", "min", "max")
 _CHECK_KEYS = ("offset", "type", "equals")
-_NUMBER_KEYS = ("scale", "bias", "min", "max")  # horen bij een analoog signaal, niet bij een bitveld
+_NUMBER_KEYS = ("scale", "bias", "min", "max")  # belong to an analog signal, not to a bit field
 _BYTE_ORDERS = ("big", "little")
 
-# Bewust zonder getallen en zonder verwachte waarde: de melding belandt in logs en mag de sleutel van
-# de controle niet verraden.
-_CHECK_MISMATCH = "controlewoord klopt niet: geen telegram van de verwachte afzender of een verkeerd formaat"
+# Deliberately without numbers and without the expected value: the message ends up in logs and must not
+# reveal the key of the check.
+_CHECK_MISMATCH = "check word mismatch: not a telegram from the expected sender, or a wrong format"
 
 
 class FormatError(ValueError):
-    """Het formaat is ongeldig. De tekst noemt het signaal, de sleutel of de index; nooit de waarde van een check."""
+    """The format is invalid. The text names the signal, the key or the index; never the value of a check."""
 
 
 class PacketError(ValueError):
-    """Een datagram past niet bij het formaat. De tekst is bedoeld voor de logs en bevat geen pakketinhoud."""
+    """A datagram does not match the format. The text is meant for the logs and contains no packet contents."""
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ class _Type:
     size: int
     integer: bool
     signed: bool
-    low: int | None  # grenzen van een geheel type; None bij floats
+    low: int | None  # limits of an integer type; None for floats
     high: int | None
 
 
@@ -86,12 +86,12 @@ _TYPES = {
         _integer("int16", "h", 2, True),
         _integer("uint32", "I", 4, False),
         _integer("int32", "i", 4, True),
-        _integer("int64", "q", 8, True),  # bewust geen uint64: de uitkomst is een float en die houdt 2**64 niet vast
+        _integer("int64", "q", 8, True),  # deliberately no uint64: the result is a float and that cannot hold 2**64
         _Type("float32", "f", 4, False, True, None, None),
         _Type("float64", "d", 8, False, True, None, None),
     )
 }
-# Zoals ibaPDA de types noemt (IEC 61131-3).
+# The type names as ibaPDA uses them (IEC 61131-3).
 _ALIASES = {
     "byte": "uint8",
     "sint": "int8",
@@ -104,17 +104,17 @@ _ALIASES = {
     "double": "float64",
 }
 _TYPE_HELP = ", ".join(f"{canonical}/{alias.upper()}" for alias, canonical in _ALIASES.items())
-_FLOAT32 = struct.Struct("<f")  # alleen om overloop bij encode() te melden
+_FLOAT32 = struct.Struct("<f")  # only to report overflow in encode()
 
 
 def _find_type(name: str) -> _Type | None:
-    key = name.lower()  # lower() en geen casefold(): casefold laat ook een lange s (U+017F) voor een s doorgaan
+    key = name.lower()  # lower() and not casefold(): casefold also lets a long s (U+017F) pass for an s
     return _TYPES.get(_ALIASES.get(key, key))
 
 
 @dataclass(frozen=True)
 class Field:
-    """Een signaal in het telegram. `type` is de canonieke naam; bit, min en max zijn None als ze ontbreken."""
+    """A signal in the telegram. `type` is the canonical name; bit, min and max are None when absent."""
 
     signal: str
     offset: int
@@ -128,38 +128,38 @@ class Field:
 
 @dataclass(frozen=True)
 class Check:
-    """Een constant woord dat in elk telegram moet staan."""
+    """A constant word that must be present in every telegram."""
 
     offset: int
     type: str
-    equals: int = field(repr=False)  # nooit in logs of tracebacks: het is de sleutel tegen losse pakketten
+    equals: int = field(repr=False)  # never in logs or tracebacks: it is the key against stray packets
 
 
-# ---- het formaat inlezen ------------------------------------------------------------------------------
+# ---- reading the format -------------------------------------------------------------------------------
 
 
 def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)  # een JSON-boolean is geen getal
+    return isinstance(value, int) and not isinstance(value, bool)  # a JSON boolean is not a number
 
 
 def _finite(value: Any) -> float | None:
-    """value als float, of None als het geen getal is (ook geen boolean) of niet eindig."""
+    """value as a float, or None if it is not a number (a boolean does not count) or not finite."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
         number = float(value)
-    except OverflowError:  # een int boven het float-bereik
+    except OverflowError:  # an int above the float range
         return None
     return number if math.isfinite(number) else None
 
 
 def _ascii(text: str) -> str:
-    """Voor in een melding: alles buiten ASCII als escape, zodat een Windows-console er niet over struikelt."""
+    """For use in a message: everything outside ASCII as an escape, so a Windows console does not choke on it."""
     return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def _shorten(value: Any, limit: int = 40) -> str:
-    """Voor in een melding: een sleutel of typenaam uit het bestand, ingekort en in ASCII."""
+    """For use in a message: a key or type name from the file, shortened and in ASCII."""
     text = ascii(value)
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
@@ -167,32 +167,32 @@ def _shorten(value: Any, limit: int = 40) -> str:
 def _reject_unknown_keys(entry: Mapping, allowed: tuple[str, ...], where: str) -> None:
     for key in entry:
         if key not in allowed:
-            raise FormatError(f"{where}: onbekende sleutel {_shorten(key)} (toegestaan: {', '.join(allowed)})")
+            raise FormatError(f"{where}: unknown key {_shorten(key)} (allowed: {', '.join(allowed)})")
 
 
 def _require(entry: Mapping, key: str, where: str) -> Any:
     if key not in entry:
-        raise FormatError(f"{where}: {key!r} ontbreekt")
+        raise FormatError(f"{where}: {key!r} is missing")
     return entry[key]
 
 
 def _parse_offset(where: str, value: Any) -> int:
     if not _is_int(value) or value < 0:
-        raise FormatError(f"{where}: offset moet een geheel getal van 0 of meer zijn")
+        raise FormatError(f"{where}: offset must be an integer of 0 or more")
     return value
 
 
 def _parse_type(where: str, value: Any) -> _Type:
     kind = _find_type(value) if isinstance(value, str) else None
     if kind is None:
-        raise FormatError(f"{where}: onbekend type {_shorten(value)} (kies uit: {_TYPE_HELP})")
+        raise FormatError(f"{where}: unknown type {_shorten(value)} (choose from: {_TYPE_HELP})")
     return kind
 
 
 def _parse_field(index: int, entry: Any) -> Field:
     where = f"fields[{index}]"
     if not isinstance(entry, Mapping):
-        raise FormatError(f"{where} moet een JSON-object zijn, geen {type(entry).__name__}")
+        raise FormatError(f"{where} must be a JSON object, not {type(entry).__name__}")
     name = entry.get("signal")
     if isinstance(name, str) and name:
         where += f" ({name!a})"
@@ -200,7 +200,7 @@ def _parse_field(index: int, entry: Any) -> Field:
     for key in ("signal", "offset", "type"):
         _require(entry, key, where)
     if not isinstance(name, str) or not name:
-        raise FormatError(f"{where}: signal moet een niet-lege tekst zijn")
+        raise FormatError(f"{where}: signal must be a non-empty string")
     offset = _parse_offset(where, entry["offset"])
     kind = _parse_type(where, entry["type"])
 
@@ -208,91 +208,91 @@ def _parse_field(index: int, entry: Any) -> Field:
     if "bit" in entry:
         bit = entry["bit"]
         if not kind.integer:
-            raise FormatError(f"{where}: bit hoort bij een geheel type, niet bij {kind.name}")
+            raise FormatError(f"{where}: bit belongs to an integer type, not to {kind.name}")
         if not _is_int(bit) or not 0 <= bit < 8 * kind.size:
             last = 8 * kind.size - 1
-            raise FormatError(f"{where}: bit moet een geheel getal van 0 tot en met {last} zijn ({kind.name})")
+            raise FormatError(f"{where}: bit must be an integer from 0 to {last} inclusive ({kind.name})")
         extras = [key for key in _NUMBER_KEYS if key in entry]
         if extras:
-            raise FormatError(f"{where}: een bitveld mag geen {' of '.join(extras)} hebben")
+            raise FormatError(f"{where}: a bit field cannot have {' or '.join(extras)}")
 
     settings: dict[str, float] = {}
     for key in _NUMBER_KEYS:
         if key in entry:
             number = _finite(entry[key])
             if number is None:
-                raise FormatError(f"{where}: {key} moet een eindig getal zijn")
+                raise FormatError(f"{where}: {key} must be a finite number")
             settings[key] = number
     if settings.get("scale") == 0:
-        raise FormatError(f"{where}: scale mag niet 0 zijn")
+        raise FormatError(f"{where}: scale must not be 0")
     low, high = settings.get("min"), settings.get("max")
     if low is not None and high is not None and low > high:
-        raise FormatError(f"{where}: min ({low:g}) is groter dan max ({high:g})")
+        raise FormatError(f"{where}: min ({low:g}) is greater than max ({high:g})")
     return Field(name, offset, kind.name, bit, settings.get("scale", 1.0), settings.get("bias", 0.0), low, high)
 
 
 def _parse_check(index: int, entry: Any) -> Check:
     where = f"checks[{index}]"
     if not isinstance(entry, Mapping):
-        raise FormatError(f"{where} moet een JSON-object zijn, geen {type(entry).__name__}")
+        raise FormatError(f"{where} must be a JSON object, not {type(entry).__name__}")
     _reject_unknown_keys(entry, _CHECK_KEYS, where)
     for key in _CHECK_KEYS:
         _require(entry, key, where)
     offset = _parse_offset(where, entry["offset"])
     kind = _parse_type(where, entry["type"])
     if not kind.integer:
-        raise FormatError(f"{where}: alleen gehele types kunnen een check zijn, niet {kind.name}")
+        raise FormatError(f"{where}: only integer types can be a check, not {kind.name}")
     equals = entry["equals"]
     if not _is_int(equals) or not kind.low <= equals <= kind.high:
-        # De waarde zelf blijft uit de melding: het is de sleutel van de controle.
-        raise FormatError(f"{where}: equals moet een geheel getal zijn dat in {kind.name} past")
+        # The value itself stays out of the message: it is the key of the check.
+        raise FormatError(f"{where}: equals must be an integer that fits in {kind.name}")
     return Check(offset, kind.name, equals)
 
 
 def _parse_timestamp(value: Any) -> None:
     if not isinstance(value, Mapping):
-        raise FormatError('timestamp moet een JSON-object zijn, bijvoorbeeld {"source": "receive"}')
+        raise FormatError('timestamp must be a JSON object, for example {"source": "receive"}')
     _reject_unknown_keys(value, ("source",), "timestamp")
     if _require(value, "source", "timestamp") != "receive":
-        raise FormatError('timestamp: source moet "receive" zijn (de enige ondersteunde bron)')
+        raise FormatError('timestamp: source must be "receive" (the only supported source)')
 
 
 def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """json.loads houdt bij een dubbele sleutel stil de laatste; bij byte_order is dat levensgevaarlijk."""
+    """json.loads silently keeps the last of a duplicate key; for byte_order that is dangerous."""
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise FormatError(f"sleutel {_shorten(key)} komt twee keer voor in hetzelfde JSON-object")
+            raise FormatError(f"key {_shorten(key)} occurs twice in the same JSON object")
         result[key] = value
     return result
 
 
-# ---- de indeling controleren en tot een struct omzetten ---------------------------------------------
+# ---- checking the layout and turning it into a struct -----------------------------------------------
 
 
 def _check_bounds(label: str, offset: int, kind: _Type, body: int, header: int) -> None:
     if offset + kind.size > body:
-        hint = " (offsets tellen vanaf het einde van de header)" if header else ""
+        hint = " (offsets count from the end of the header)" if header else ""
         raise FormatError(
-            f"{label}: {kind.size} bytes ({kind.name}) op offset {offset} passen niet in de {body} bytes "
-            f"na de header{hint}"
+            f"{label}: {kind.size} bytes ({kind.name}) at offset {offset} do not fit in the {body} bytes "
+            f"after the header{hint}"
         )
 
 
 def _wire_order(
     fields: tuple[Field, ...], checks: tuple[Check, ...], body: int, header: int
 ) -> list[tuple[int, str]]:
-    """Controleer namen, grenzen en overlap; geef de gelezen woorden (offset, type) in volgorde van offset.
+    """Check names, bounds and overlap; return the words read (offset, type) in order of offset.
 
-    Bitvelden met hetzelfde offset en type delen een woord. Elke andere overlap is een fout.
+    Bit fields with the same offset and type share a word. Any other overlap is an error.
     """
     first_with_name: dict[str, int] = {}
-    claims: list[tuple[int, int, str, tuple[int, str]]] = []  # (begin, einde, label, woord)
+    claims: list[tuple[int, int, str, tuple[int, str]]] = []  # (start, end, label, word)
     bit_words: set[tuple[int, str]] = set()
     for index, f in enumerate(fields):
         label = f"fields[{index}] ({f.signal!a})"
         if f.signal in first_with_name:
-            raise FormatError(f"{label}: signaal komt al voor in fields[{first_with_name[f.signal]}]")
+            raise FormatError(f"{label}: signal already occurs in fields[{first_with_name[f.signal]}]")
         first_with_name[f.signal] = index
         kind = _TYPES[f.type]
         _check_bounds(label, f.offset, kind, body, header)
@@ -310,14 +310,14 @@ def _wire_order(
 
     claims.sort(key=lambda claim: claim[:2])
     for before, after in zip(claims, claims[1:]):
-        if after[0] < before[1]:  # op begin gesorteerd: zijn de buren heel, dan overlapt niets
-            raise FormatError(f"{after[2]} overlapt met {before[2]}")
+        if after[0] < before[1]:  # sorted by start: if the neighbours are clear, nothing overlaps
+            raise FormatError(f"{after[2]} overlaps with {before[2]}")
     return [claim[3] for claim in claims]
 
 
 def _struct_for(byte_order: str, header: int, body: int, order: list[tuple[int, str]]) -> struct.Struct:
-    """Het hele telegram als een struct: header en leemtes als pad-bytes, de woorden op volgorde van offset."""
-    parts = ["<" if byte_order == "little" else ">"]  # standaardgroottes, geen uitlijning
+    """The whole telegram as one struct: header and gaps as pad bytes, the words in order of offset."""
+    parts = ["<" if byte_order == "little" else ">"]  # standard sizes, no alignment
     if header:
         parts.append(f"{header}x")
     cursor = 0
@@ -333,51 +333,51 @@ def _struct_for(byte_order: str, header: int, body: int, order: list[tuple[int, 
 
 
 class _Read(NamedTuple):
-    """Hoe decode() een signaal uit het uitgepakte tuple haalt."""
+    """How decode() gets a signal out of the unpacked tuple."""
 
     signal: str
-    place: int  # plaats in het uitgepakte tuple
-    mask: int  # bitmasker van een bitveld; 0 bij een analoog signaal
+    place: int  # position in the unpacked tuple
+    mask: int  # bit mask of a bit field; 0 for an analog signal
     scale: float
     bias: float
-    low: float  # -inf zonder min: zonder grens geldt geen grens, en dat scheelt een vergelijking
+    low: float  # -inf without min: no bound means no limit, and that saves a comparison
     high: float
 
 
 @dataclass(frozen=True)
 class _Compiled:
-    """Alles wat decode() en encode() per telegram nodig hebben, vooraf berekend."""
+    """Everything decode() and encode() need per telegram, precomputed."""
 
-    layout: struct.Struct  # het hele telegram in een keer: header en leemtes als pad-bytes
-    slots: dict[tuple[int, str], int]  # woord (offset, type) -> plaats in het uitgepakte tuple
-    checks: tuple[tuple[int, int], ...]  # (plaats, verwachte waarde)
+    layout: struct.Struct  # the whole telegram in one go: header and gaps as pad bytes
+    slots: dict[tuple[int, str], int]  # word (offset, type) -> position in the unpacked tuple
+    checks: tuple[tuple[int, int], ...]  # (position, expected value)
     reads: tuple[_Read, ...]
-    template: tuple[int, ...]  # voor encode(): nullen, met de checkwoorden ingevuld
+    template: tuple[int, ...]  # for encode(): zeros, with the check words filled in
 
 
 @dataclass(frozen=True)
 class PacketFormat:
-    """Hoe een telegram eruitziet en hoe het gelezen en geschreven wordt.
+    """What a telegram looks like and how it is read and written.
 
-    Bouw het met from_dict() of load(): die controleren het formaat helemaal. Een fout formaat moet bij het
-    laden stuklopen, niet pas als er stille onzin in de grafieken staat.
+    Build it with from_dict() or load(): those check the format completely. A wrong format must fail at load
+    time, not only once silent nonsense shows up in the charts.
     """
 
-    byte_order: str  # "big" of "little"
-    packet_bytes: int  # exacte lengte van een datagram, inclusief de header
-    header_bytes: int  # genegeerde kop; alle offsets tellen vanaf het einde ervan
+    byte_order: str  # "big" or "little"
+    packet_bytes: int  # exact length of a datagram, including the header
+    header_bytes: int  # ignored header; all offsets count from the end of it
     fields: tuple[Field, ...]
     checks: tuple[Check, ...] = ()
-    signals: tuple[str, ...] = field(init=False, repr=False, compare=False)  # in de volgorde van fields
+    signals: tuple[str, ...] = field(init=False, repr=False, compare=False)  # in the order of fields
     _compiled: _Compiled = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.byte_order not in _BYTE_ORDERS:
-            raise FormatError('byte_order moet "big" of "little" zijn')
+            raise FormatError('byte_order must be "big" or "little"')
         object.__setattr__(self, "fields", tuple(self.fields))
         object.__setattr__(self, "checks", tuple(self.checks))
         if not self.fields:
-            raise FormatError("fields mag niet leeg zijn")
+            raise FormatError("fields must not be empty")
         body = self.packet_bytes - self.header_bytes
         order = _wire_order(self.fields, self.checks, body, self.header_bytes)
         slots = {word: place for place, word in enumerate(order)}
@@ -407,43 +407,43 @@ class PacketFormat:
         object.__setattr__(self, "_compiled", compiled)
 
     def __reduce__(self):
-        # struct.Struct is niet te pickelen; de definitie is genoeg, de rest wordt opnieuw berekend
+        # struct.Struct cannot be pickled; the definition is enough, the rest is recomputed
         return (type(self), (self.byte_order, self.packet_bytes, self.header_bytes, self.fields, self.checks))
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any], *, required_signals: Iterable[str] | None = None) -> "PacketFormat":
-        """Bouw het formaat uit de JSON-structuur. Alles wat niet klopt is een FormatError met een Nederlandse
-        melding die het signaal, de sleutel of de index noemt.
+        """Build the format from the JSON structure. Anything that is wrong is a FormatError with an English
+        message that names the signal, the key or the index.
 
-        required_signals: de signalen in "fields" moeten precies deze verzameling zijn.
+        required_signals: the signals in "fields" must be exactly this set.
         """
         if not isinstance(data, Mapping):
-            raise FormatError(f"formaat moet een JSON-object zijn, geen {type(data).__name__}")
-        _reject_unknown_keys(data, _TOP_KEYS, "formaat")
+            raise FormatError(f"format must be a JSON object, not {type(data).__name__}")
+        _reject_unknown_keys(data, _TOP_KEYS, "format")
 
         if "byte_order" not in data:
-            raise FormatError('formaat: byte_order ontbreekt; kies "big" of "little" (er is bewust geen standaard)')
+            raise FormatError('format: byte_order is missing; choose "big" or "little" (deliberately no default)')
         byte_order = data["byte_order"]
         if not isinstance(byte_order, str) or byte_order not in _BYTE_ORDERS:
-            raise FormatError('formaat: byte_order moet "big" of "little" zijn')
-        packet_bytes = _require(data, "packet_bytes", "formaat")
+            raise FormatError('format: byte_order must be "big" or "little"')
+        packet_bytes = _require(data, "packet_bytes", "format")
         if not _is_int(packet_bytes) or not 1 <= packet_bytes <= MAX_PACKET_BYTES:
-            raise FormatError(f"formaat: packet_bytes moet een geheel getal van 1 tot en met {MAX_PACKET_BYTES} zijn")
+            raise FormatError(f"format: packet_bytes must be an integer from 1 to {MAX_PACKET_BYTES} inclusive")
         header_bytes = data.get("header_bytes", 0)
         if not _is_int(header_bytes) or header_bytes < 0:
-            raise FormatError("formaat: header_bytes moet een geheel getal van 0 of meer zijn")
+            raise FormatError("format: header_bytes must be an integer of 0 or more")
         if header_bytes >= packet_bytes:
             raise FormatError(
-                f"formaat: header_bytes ({header_bytes}) laat geen ruimte over in packet_bytes ({packet_bytes})"
+                f"format: header_bytes ({header_bytes}) leaves no room in packet_bytes ({packet_bytes})"
             )
 
-        raw_fields = _require(data, "fields", "formaat")
+        raw_fields = _require(data, "fields", "format")
         if not isinstance(raw_fields, (list, tuple)) or not raw_fields:
-            raise FormatError("formaat: fields moet een lijst met minstens een veld zijn")
+            raise FormatError("format: fields must be a list with at least one field")
         fields = tuple(_parse_field(index, entry) for index, entry in enumerate(raw_fields))
         raw_checks = data.get("checks", [])
         if not isinstance(raw_checks, (list, tuple)):
-            raise FormatError("formaat: checks moet een lijst zijn")
+            raise FormatError("format: checks must be a list")
         checks = tuple(_parse_check(index, entry) for index, entry in enumerate(raw_checks))
         if "timestamp" in data:
             _parse_timestamp(data["timestamp"])
@@ -454,52 +454,52 @@ class PacketFormat:
             if wanted != present:
                 parts = []
                 if wanted - present:
-                    parts.append("ontbrekend: " + ", ".join(sorted(wanted - present)))
+                    parts.append("missing: " + ", ".join(sorted(wanted - present)))
                 if present - wanted:
-                    parts.append("onbekend: " + ", ".join(sorted(present - wanted)))
-                raise FormatError("de signalen in fields komen niet overeen met de verwachte; " + "; ".join(parts))
+                    parts.append("unknown: " + ", ".join(sorted(present - wanted)))
+                raise FormatError("the signals in fields do not match the expected ones; " + "; ".join(parts))
         return fmt
 
     @classmethod
     def load(cls, path: str | PathLike[str], *, required_signals: Iterable[str] | None = None) -> "PacketFormat":
-        """Lees het formaat uit een JSON-bestand (UTF-8, met of zonder BOM).
+        """Read the format from a JSON file (UTF-8, with or without BOM).
 
-        De meldingen noemen het pad en nooit de inhoud van het bestand: het kan per ongeluk het verkeerde bestand
-        zijn, bijvoorbeeld een met een ApiKey erin. Bij onleesbare JSON staat er alleen de plek van de fout in; bij
-        een fout formaat noemt de melding sleutels, signaal- en typenamen en indexen, en nooit een check-waarde.
+        The messages name the path and never the contents of the file: it may be the wrong file by accident,
+        for example one with an ApiKey in it. For unreadable JSON the message only gives the location of the
+        error; for a wrong format it names keys, signal and type names and indexes, and never a check value.
         """
         path = Path(path)
         try:
-            text = path.read_text(encoding="utf-8-sig")  # Kladblok zet er graag een BOM voor
+            text = path.read_text(encoding="utf-8-sig")  # Notepad likes to put a BOM in front
         except FileNotFoundError:
-            raise FormatError(f"Formaatbestand niet gevonden: {path}") from None
+            raise FormatError(f"Format file not found: {path}") from None
         except UnicodeDecodeError:
-            raise FormatError(f"Formaatbestand {path} is geen UTF-8; sla het op als UTF-8") from None
+            raise FormatError(f"Format file {path} is not UTF-8; save it as UTF-8") from None
         except (OSError, ValueError) as err:
-            raise FormatError(f"Formaatbestand {path} is niet te lezen ({type(err).__name__})") from None
+            raise FormatError(f"Format file {path} cannot be read ({type(err).__name__})") from None
         try:
             data = json.loads(text, object_pairs_hook=_no_duplicate_keys)
-        except FormatError as err:  # van de hook; FormatError is een ValueError en moet dus eerst
-            raise FormatError(f"Formaatbestand {path}: {err}") from None
+        except FormatError as err:  # from the hook; FormatError is a ValueError and so must come first
+            raise FormatError(f"Format file {path}: {err}") from None
         except json.JSONDecodeError as err:
-            where = f"regel {err.lineno}, kolom {err.colno}"  # de plek, niet de tekst eromheen
-            raise FormatError(f"Formaatbestand {path} is geen geldige JSON ({where})") from None
-        except (ValueError, RecursionError) as err:  # bv. een getal van duizenden cijfers, of absurde nesting
-            raise FormatError(f"Formaatbestand {path} is geen geldige JSON ({type(err).__name__})") from None
+            where = f"line {err.lineno}, column {err.colno}"  # the location, not the text around it
+            raise FormatError(f"Format file {path} is not valid JSON ({where})") from None
+        except (ValueError, RecursionError) as err:  # e.g. a number of thousands of digits, or absurd nesting
+            raise FormatError(f"Format file {path} is not valid JSON ({type(err).__name__})") from None
         try:
             return cls.from_dict(data, required_signals=required_signals)
         except FormatError as err:
-            raise FormatError(f"Formaatbestand {path}: {err}") from None
+            raise FormatError(f"Format file {path}: {err}") from None
 
     def decode(self, packet: bytes | bytearray | memoryview) -> dict[str, float]:
-        """Lees alle signalen uit een datagram. Gooit PacketError en niets anders, wat er ook binnenkomt.
+        """Read all signals from a datagram. Raises PacketError and nothing else, whatever comes in.
 
-        De waarden staan in de volgorde van `fields`: een bitveld als 1.0 of 0.0, de rest als ruw * scale + bias.
+        The values are in the order of `fields`: a bit field as 1.0 or 0.0, the rest as raw * scale + bias.
         """
         plan = self._compiled
         try:
-            words = plan.layout.unpack(packet)  # controleert ook de lengte
-        except Exception:  # struct.error bij een verkeerde lengte, anders een vreemd object (geen bytes, vrijgegeven)
+            words = plan.layout.unpack(packet)  # also checks the length
+        except Exception:  # struct.error for a wrong length, otherwise a strange object (not bytes, released)
             raise PacketError(self._misfit(packet)) from None
         for place, expected in plan.checks:
             if words[place] != expected:
@@ -508,13 +508,13 @@ class PacketFormat:
         for signal, place, mask, scale, bias, low, high in plan.reads:
             word = words[place]
             if mask:
-                values[signal] = 1.0 if word & mask else 0.0  # ook goed voor het tekenbit van een getal met teken
+                values[signal] = 1.0 if word & mask else 0.0  # also right for the sign bit of a signed number
                 continue
             value = word * scale + bias
             if not math.isfinite(value):
-                raise PacketError(f"{_ascii(signal)}: waarde is NaN of oneindig")
-            if not low <= value <= high:  # de waarde zelf blijft uit de melding: die belandt in de logs
-                raise PacketError(f"{_ascii(signal)}: waarde valt buiten het bereik ({_bounds_text(low, high)})")
+                raise PacketError(f"{_ascii(signal)}: value is NaN or infinite")
+            if not low <= value <= high:  # the value itself stays out of the message: it ends up in the logs
+                raise PacketError(f"{_ascii(signal)}: value is outside the range ({_bounds_text(low, high)})")
             values[signal] = value
         return values
 
@@ -522,23 +522,23 @@ class PacketFormat:
         try:
             actual = memoryview(packet).nbytes
         except ValueError:
-            return "telegram is niet meer te lezen (vrijgegeven memoryview)"
-        except Exception:  # meestal een TypeError: geen bytes-achtig object
-            return f"telegram moet bytes zijn, kreeg {type(packet).__name__}"
+            return "telegram can no longer be read (released memoryview)"
+        except Exception:  # usually a TypeError: not a bytes-like object
+            return f"telegram must be bytes, got {type(packet).__name__}"
         if actual != self.packet_bytes:
-            return f"telegram is {actual} bytes, verwacht {self.packet_bytes} bytes"
-        return "telegram is niet als aaneengesloten bytes te lezen"
+            return f"telegram is {actual} bytes, expected {self.packet_bytes} bytes"
+        return "telegram cannot be read as contiguous bytes"
 
     def encode(self, values: Mapping[str, float]) -> bytes:
-        """Het omgekeerde van decode(), voor de simulator en de tests.
+        """The inverse of decode(), for the simulator and the tests.
 
-        De header, de leemtes en de bits die geen signaal zijn blijven nul; de checkwoorden worden ingevuld.
-        Bitvelden in hetzelfde woord worden samengevoegd (bit gezet bij een waarde boven 0.5). min en max worden
-        hier niet afgedwongen, zodat een test ook een telegram buiten het bereik kan maken.
+        The header, the gaps and the bits that are not a signal stay zero; the check words are filled in.
+        Bit fields in the same word are merged (bit set for a value above 0.5). min and max are not enforced
+        here, so a test can also build a telegram outside the range.
 
-        Gooit ValueError bij een ontbrekend of onbekend signaal, een niet-eindige waarde of een waarde die niet
-        in het type past. decode(encode(v)) geeft v terug op de nauwkeurigheid van het type: exact bij float64
-        zonder scale en bias, anders binnen een halve stap (scale/2) bij gehele types en float32-precisie.
+        Raises ValueError for a missing or unknown signal, a non-finite value or a value that does not fit
+        in the type. decode(encode(v)) returns v to the precision of the type: exact for float64 without
+        scale and bias, otherwise within half a step (scale/2) for integer types and float32 precision.
         """
         plan = self._compiled
         unknown = sorted(_shorten(name) for name in values if name not in self.signals)
@@ -546,9 +546,9 @@ class PacketFormat:
         if unknown or missing:
             problems = []
             if missing:
-                problems.append("signaal ontbreekt: " + ", ".join(missing))
+                problems.append("signal missing: " + ", ".join(missing))
             if unknown:
-                problems.append("onbekend signaal: " + ", ".join(unknown))
+                problems.append("unknown signal: " + ", ".join(unknown))
             raise ValueError("; ".join(problems))
 
         raw: list[int | float] = list(plan.template)
@@ -574,12 +574,12 @@ class PacketFormat:
                 if kind.code == "f":
                     try:
                         _FLOAT32.pack(scaled)
-                    except OverflowError:  # buiten het float32-bereik; struct meldt dat zonder signaalnaam
+                    except OverflowError:  # outside the float32 range; struct reports that without a signal name
                         raise _does_not_fit(f, number) from None
                 raw[place] = scaled
         for place, (word, kind) in bit_words.items():
             if kind.signed and word >= 1 << (8 * kind.size - 1):
-                word -= 1 << (8 * kind.size)  # struct wil een getal met teken als de code dat zegt
+                word -= 1 << (8 * kind.size)  # struct wants a signed number when the code says so
             raw[place] = word
         return plan.layout.pack(*raw)
 
@@ -594,20 +594,20 @@ def _bounds_text(low: float, high: float) -> str:
 
 
 def _does_not_fit(f: Field, number: float) -> ValueError:
-    return ValueError(f"{_ascii(f.signal)}: waarde {number:g} past niet in {f.type}")
+    return ValueError(f"{_ascii(f.signal)}: value {number:g} does not fit in {f.type}")
 
 
 def _as_finite_float(signal: str, value: Any) -> float:
-    """Alles wat float() als getal leest (ook bool en numpy-scalars), behalve tekst: float("1.5") slaagt, maar
-    dan heeft de aanroeper een fout gemaakt."""
+    """Anything float() reads as a number (including bool and numpy scalars), except text: float("1.5") succeeds,
+    but then the caller has made a mistake."""
     if isinstance(value, (str, bytes, bytearray)):
-        raise ValueError(f"{_ascii(signal)}: waarde moet een getal zijn, geen {type(value).__name__}")
+        raise ValueError(f"{_ascii(signal)}: value must be a number, not {type(value).__name__}")
     try:
         number = float(value)
     except (TypeError, ValueError):
-        raise ValueError(f"{_ascii(signal)}: waarde moet een getal zijn, geen {type(value).__name__}") from None
-    except OverflowError:  # een gigantische int
-        raise ValueError(f"{_ascii(signal)}: waarde is te groot") from None
+        raise ValueError(f"{_ascii(signal)}: value must be a number, not {type(value).__name__}") from None
+    except OverflowError:  # a gigantic int
+        raise ValueError(f"{_ascii(signal)}: value is too large") from None
     if not math.isfinite(number):
-        raise ValueError(f"{_ascii(signal)}: waarde is NaN of oneindig")
+        raise ValueError(f"{_ascii(signal)}: value is NaN or infinite")
     return number

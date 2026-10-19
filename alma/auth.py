@@ -1,8 +1,8 @@
-"""Inloggen via OpenID Connect (Authentik).
+"""Login via OpenID Connect (Authentik).
 
-Alles is standaard geweigerd: elke route behalve PUBLIC_PATHS vereist een geldige sessie, dus
-een nieuwe route kan niet per ongeluk open staan. De sessie zit in een ondertekende cookie;
-we bewaren daarin alleen wie er is ingelogd, geen tokens.
+Everything is denied by default: every route except PUBLIC_PATHS requires a valid session, so
+a new route cannot be left open by accident. The session lives in a signed cookie; we only
+store who is logged in there, never tokens.
 """
 
 import logging
@@ -17,7 +17,7 @@ from alma.config import Settings
 
 log = logging.getLogger("alma.auth")
 
-# Exacte paden, geen prefix: zo kan een pad als /auth/../api/x nooit als 'publiek' tellen.
+# Exact paths, no prefix: this way a path like /auth/../api/x can never count as 'public'.
 PUBLIC_PATHS = frozenset({"/healthz", "/auth/login", "/auth/callback", "/auth/logout", "/auth/logged-out"})
 
 USER_KEY = "user"
@@ -26,10 +26,10 @@ MAX_CLAIM_LENGTH = 200
 
 
 def safe_next(value: str | None) -> str:
-    """Geef value terug als het een relatief pad binnen deze app is, anders '/' (geen open redirect)."""
+    """Return value if it is a relative path within this app, otherwise '/' (no open redirect)."""
     if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
         return "/"
-    if any(ord(c) < 32 or ord(c) == 127 for c in value):  # browsers strippen tab/newline uit URL's
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):  # browsers strip tab/newline from URLs
         return "/"
     parts = urlsplit(value)
     if parts.scheme or parts.netloc:
@@ -38,7 +38,7 @@ def safe_next(value: str | None) -> str:
 
 
 def _page(status: int, title: str, message: str, link: tuple[str, str] | None = ("/auth/login", "Log in again")) -> HTMLResponse:
-    """Eenvoudige foutpagina; bevat alleen vaste tekst, nooit waarden uit het verzoek of van de IdP."""
+    """Simple error page; contains fixed text only, never values from the request or from the IdP."""
     anchor = f'<p><a href="{link[0]}">{link[1]}</a></p>' if link else ""
     html = (
         '<!doctype html><html lang="en"><meta charset="utf-8">'
@@ -55,7 +55,7 @@ def _clip(value: object) -> str | None:
 
 def install_auth(app: FastAPI, settings: Settings) -> None:
     if not settings.auth_enabled:
-        log.warning("INLOGGEN STAAT UIT (ALMA_AUTH_ENABLED=false): iedereen met netwerktoegang ziet het dashboard")
+        log.warning("LOGIN IS DISABLED (ALMA_AUTH_ENABLED=false): anyone with network access can see the dashboard")
 
         @app.get("/api/me")
         def me_anonymous():
@@ -83,19 +83,19 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
         if path in PUBLIC_PATHS or (isinstance(user, dict) and user.get("sub")):
             return await call_next(request)
         if path.startswith("/api/") or request.method not in ("GET", "HEAD"):
-            return JSONResponse({"detail": "Niet ingelogd"}, status_code=401)
+            return JSONResponse({"detail": "Not logged in"}, status_code=401)
         target = safe_next(path + (f"?{request.url.query}" if request.url.query else ""))
         return RedirectResponse(f"/auth/login?next={quote(target, safe='')}", status_code=302)
 
-    # Moet na de poort worden toegevoegd: de laatst toegevoegde middleware draait als eerste.
+    # Must be added after the gate: the last middleware added runs first.
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret.get_secret_value(),
-        # __Host- laat de browser alleen een host-only, Secure cookie op '/' accepteren, zodat een
-        # zusterdomein geen sessiecookie kan opdringen. Vereist https, dus niet bij lokaal http.
+        # __Host- makes the browser accept only a host-only, Secure cookie on '/', so a sibling
+        # domain cannot force a session cookie on us. Requires https, so not used on local http.
         session_cookie="__Host-alma_session" if settings.public_is_https else "alma_session",
         max_age=settings.session_max_age_s,
-        same_site="lax",  # 'lax' is nodig: de terugkeer van Authentik is een cross-site navigatie
+        same_site="lax",  # 'lax' is required: the return from Authentik is a cross-site navigation
         https_only=settings.public_is_https,
     )
 
@@ -109,9 +109,9 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
         try:
             return await oidc.authorize_redirect(request, redirect_uri)
         except Exception:
-            # Bewust breed: netwerkfouten, een kapotte discovery-respons of een verkeerde issuer-URL
-            # moeten allemaal een nette melding geven (en een traceback in de log), geen 500.
-            log.exception("Starten van inloggen bij Authentik mislukt")
+            # Deliberately broad: network errors, a broken discovery response or a wrong issuer URL
+            # must all give a clean error page (and a traceback in the log), not a 500.
+            log.exception("Starting login with Authentik failed")
             return _page(502, "Login unavailable", "Authentik cannot be reached right now. Please try again shortly.")
 
     @app.get("/auth/callback")
@@ -119,12 +119,12 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
         next_url = safe_next(request.session.get(NEXT_KEY))
         try:
             token = await oidc.authorize_access_token(request)
-        except OAuthError as exc:  # onjuiste state, fout van Authentik of een geweigerde code
-            log.warning("Inloggen mislukt: %s", exc.error)
+        except OAuthError as exc:  # wrong state, error from Authentik or a rejected code
+            log.warning("Login failed: %s", exc.error)
             return _page(400, "Login failed", "The login attempt has expired or is invalid. This also happens if you log in from several tabs at once.")
         except Exception:
-            # Netwerkfout, of een id_token met ongeldige handtekening/claims: nooit inloggen, wel loggen.
-            log.exception("Afronden van inloggen mislukt")
+            # Network error, or an id_token with an invalid signature/claims: never log in, but do log it.
+            log.exception("Completing login failed")
             return _page(
                 502,
                 "Login failed",
@@ -132,23 +132,23 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
                 "Please try again; if this keeps happening, contact the administrator.",
             )
 
-        claims = token.get("userinfo")  # alleen gevuld als de id_token (handtekening, nonce, iss, aud, exp) klopt
+        claims = token.get("userinfo")  # only populated if the id_token (signature, nonce, iss, aud, exp) is valid
         if not claims or not claims.get("sub"):
-            log.warning("Inloggen geweigerd: geen gevalideerde id_token in het antwoord")
+            log.warning("Login denied: no validated id_token in the response")
             return _page(400, "Login failed", "Authentik did not return a valid identity.")
 
         if settings.allowed_groups:
             groups = claims.get("groups")
-            if groups is None:  # niet in de id_token: probeer het userinfo-endpoint
+            if groups is None:  # not in the id_token: try the userinfo endpoint
                 try:
                     groups = (await oidc.userinfo(token=token)).get("groups")
                 except Exception:
-                    log.exception("Groepen ophalen via userinfo mislukt")
+                    log.exception("Fetching groups via userinfo failed")
                     return _page(502, "Login unavailable", "Group membership could not be verified.")
             if isinstance(groups, str):
                 groups = [groups]
             if not set(groups or []) & set(settings.allowed_groups):
-                log.warning("Toegang geweigerd (geen toegestane groep): %s", _clip(claims.get("preferred_username") or claims["sub"]))
+                log.warning("Access denied (no allowed group): %s", _clip(claims.get("preferred_username") or claims["sub"]))
                 return _page(403, "No access", "Your account does not have access to this dashboard. Ask the administrator for access.", link=None)
 
         user = {
@@ -157,9 +157,9 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
             "email": _clip(claims.get("email")),
             "username": _clip(claims.get("preferred_username")),
         }
-        request.session.clear()  # nieuwe sessie na inloggen: oude state/next-data weg
+        request.session.clear()  # fresh session after login: old state/next data is gone
         request.session[USER_KEY] = user
-        log.info("Ingelogd: %s", user["username"] or user["sub"])
+        log.info("Logged in: %s", user["username"] or user["sub"])
         return RedirectResponse(next_url, status_code=302)
 
     @app.post("/auth/logout")

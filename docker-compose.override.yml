@@ -1,9 +1,9 @@
-# Wordt door `docker compose` automatisch samengevoegd met docker-compose.yml. Portainer leest dit
-# bestand niet: daar gelden de standaardbestanden uit de image.
+# Merged automatically with docker-compose.yml by `docker compose`. Portainer does not read this
+# file: there the default files from the image apply.
 services:
   alma:
     volumes:
-      # ibaHD quick-connect.json (alleen nodig bij ALMA_SOURCE=ibahd), de signaalmap en het UDP-telegramformaat.
+      # ibaHD quick-connect.json (only needed with ALMA_SOURCE=ibahd), the signal map and the UDP telegram format.
       - ./secrets:/app/secrets:ro
       - ./signals.json:/app/signals.json:ro
       - ./udp_format.json:/app/udp_format.json:ro

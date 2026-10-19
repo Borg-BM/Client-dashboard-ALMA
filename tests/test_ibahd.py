@@ -1,7 +1,7 @@
-"""Tests van de ibaHD-bron en `alma.ibahd_check` tegen een nagebootste server (zie fake_ibahd.py).
+"""Tests of the ibaHD source and `alma.ibahd_check` against a simulated server (see fake_ibahd.py).
 
-Dit toetst de client tegen onze lezing van de iba-documentatie; een echte server kan alleen
-`python -m alma.ibahd_check` beoordelen.
+This tests the client against our reading of the iba documentation; only
+`python -m alma.ibahd_check` can judge a real server.
 """
 
 import json
@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytest.importorskip("ibahd_api")  # optionele afhankelijkheid (extra 'ibahd'); zonder die slaan deze tests over
+pytest.importorskip("ibahd_api")  # optional dependency (extra 'ibahd'); without it these tests are skipped
 
 from fake_ibahd import CHANNELS, STORE, TEXT_CHANNEL, FakeIbaHd, analog_value, digital_state, full_id  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -55,7 +55,7 @@ def epoch_us(index):
     return ((index - pd.Timestamp("1970-01-01", tz="UTC")) // pd.Timedelta(microseconds=1)).to_numpy()
 
 
-# ---- de bron --------------------------------------------------------------------------------------
+# ---- the source --------------------------------------------------------------------------------------
 
 
 def test_read_returns_exactly_what_was_recorded(files):
@@ -65,10 +65,10 @@ def test_read_returns_exactly_what_was_recorded(files):
     assert list(df.columns) == SIGNALS
     assert str(df.index.tz) == "UTC" and df.index.is_monotonic_increasing
     assert start - timedelta(seconds=1) <= df.index[0] and df.index[-1] <= end + timedelta(seconds=1)
-    assert 280 <= len(df) <= 301  # 30 s op 10 Hz: bewijst dat het tijdbereik in µs goed aankomt
+    assert 280 <= len(df) <= 301  # 30 s at 10 Hz: proves the time range arrives correctly in µs
 
     t_us = epoch_us(df.index)
-    for name in SIGNALS:  # float- én double-kanalen komen op de juiste tijd en waarde terug
+    for name in SIGNALS:  # float and double channels come back at the right time and value
         assert df[name].dtype == np.float64 and not df[name].isna().any()
         np.testing.assert_allclose(df[name], analog_value(name, t_us), rtol=1e-5)
 
@@ -79,7 +79,7 @@ def test_a_digital_channel_is_laid_on_the_time_grid_of_the_others(files):
     start, end = window(30)
     channels = {"tower_x": full_id("tower_x"), "pump_running": full_id("pump_running")}
     df = fetch_channels(connect(load_quick_connect(files[0])), channels, start, end, 2_000)
-    # Het digitale kanaal heeft eigen tijdstippen (alleen de wisselmomenten) en wordt op het raster gelegd
+    # The digital channel has its own timestamps (only the toggle moments) and is laid onto the grid
     np.testing.assert_array_equal(df["pump_running"], digital_state(epoch_us(df.index)))
     assert set(df["pump_running"]) == {0.0, 1.0}
 
@@ -142,7 +142,7 @@ def test_quick_connect_and_signal_map_loading(tmp_path):
     good = {"Host": "h", "Port": 1, "ApiKey": "secret-key", "TlsServerCertificate": "pem"}
     path = tmp_path / "qc.json"
 
-    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(good).encode())  # Kladblok zet er een BOM voor
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(good).encode())  # Notepad puts a BOM in front
     assert load_quick_connect(path) == good
 
     path.write_text(json.dumps({k: v for k, v in good.items() if k != "Port"}))
@@ -151,16 +151,16 @@ def test_quick_connect_and_signal_map_loading(tmp_path):
     assert "secret-key" not in str(caught.value)
 
     path.write_text('{"ApiKey": "secret-key", oops')
-    with pytest.raises(ValueError, match="geen geldige JSON") as caught:
+    with pytest.raises(ValueError, match="not valid JSON") as caught:
         load_quick_connect(path)
     assert "secret-key" not in str(caught.value)
 
-    with pytest.raises(ValueError, match="niet gevonden"):
+    with pytest.raises(ValueError, match="not found"):
         load_quick_connect(tmp_path / "missing.json")
 
     placeholders = tmp_path / "signals.json"
     placeholders.write_text(json.dumps(PLACEHOLDERS))
-    with pytest.raises(ValueError, match="channel_id's"):
+    with pytest.raises(ValueError, match="channel IDs"):
         load_signal_map(placeholders)
 
 
@@ -169,7 +169,7 @@ def test_request_channel_id_adds_the_store_once():
     assert request_channel_id("bm010", "bm010\\[0:0]") == "bm010\\[0:0]"
 
 
-# ---- het dashboard erbovenop ---------------------------------------------------------------------
+# ---- the dashboard on top ---------------------------------------------------------------------
 
 
 def make_app(files):
@@ -198,9 +198,9 @@ def test_dashboard_gives_503_when_the_server_goes_away(tmp_path):
     finally:
         server.stop()
     response = app.get("/api/timeseries")
-    assert response.status_code == 503 and response.json() == {"detail": "Databron niet beschikbaar"}
-    assert response.headers["x-content-type-options"] == "nosniff"  # ook foutantwoorden krijgen de beveiligingsheaders
-    assert app.get("/healthz").status_code == 200  # de container blijft gezond; alleen de data ontbreekt
+    assert response.status_code == 503 and response.json() == {"detail": "Data source unavailable"}
+    assert response.headers["x-content-type-options"] == "nosniff"  # error responses get the security headers too
+    assert app.get("/healthz").status_code == 200  # the container stays healthy; only the data is missing
 
 
 def test_the_same_source_error_is_logged_once(monkeypatch, caplog):
@@ -215,8 +215,8 @@ def test_the_same_source_error_is_logged_once(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="alma"):
         statuses = [app.get("/api/timeseries").status_code for _ in range(3)]
     assert statuses == [503, 503, 503]
-    assert [r.getMessage() for r in caplog.records if "niet beschikbaar" in r.getMessage()] == [
-        "Databron niet beschikbaar: ibaHD-server: UNAVAILABLE: test"
+    assert [r.getMessage() for r in caplog.records if "Data source unavailable" in r.getMessage()] == [
+        "Data source unavailable: ibaHD-server: UNAVAILABLE: test"
     ]
 
 
@@ -227,7 +227,7 @@ def run_check(files, server, **kwargs):
     lines = []
     ok = ibahd_check.run(files[0], files[1], out=lines.append, **kwargs)
     text = "\n".join(lines)
-    assert server.quick_connect["ApiKey"] not in text  # de ApiKey komt nooit in de uitvoer
+    assert server.quick_connect["ApiKey"] not in text  # the ApiKey never appears in the output
     assert "not-the-key" not in text
     return ok, text
 
@@ -235,23 +235,23 @@ def run_check(files, server, **kwargs):
 def test_check_passes_against_a_healthy_server(files, fake):
     ok, text = run_check(files, fake)
     assert ok, text
-    for expected in (STORE, "Ingelogd", "Laatste waarde per kanaal", "Hz", "Volgende stap: zet ALMA_SOURCE=ibahd"):
+    for expected in (STORE, "Logged in", "Last value per channel", "Hz", "Next step: set ALMA_SOURCE=ibahd"):
         assert expected in text
-    assert "FOUT" not in text and "LET OP" not in text
+    assert "ERROR" not in text and "WARN" not in text
 
 
 def test_check_with_an_empty_signal_map_still_tests_reading(tmp_path, fake):
     ok, text = run_check(write_files(tmp_path, fake, PLACEHOLDERS), fake)
     assert ok, text
-    assert "nog niet ingevuld" in text and "Laatste waarde per kanaal" in text and "Meetreeks van" in text
-    assert "Volgende stap: vul signals.json" in text
+    assert "not filled in yet" in text and "Last value per channel" in text and "Reading a" in text
+    assert "Next step: fill signals.json" in text
 
 
 def test_check_suggests_the_right_id_for_a_wrong_one(tmp_path, fake):
-    signal_map = {name: full_id(name) for name in SIGNALS} | {"tower_x": "[0:0]"}  # store vergeten
+    signal_map = {name: full_id(name) for name in SIGNALS} | {"tower_x": "[0:0]"}  # store forgotten
     ok, text = run_check(write_files(tmp_path, fake, signal_map), fake)
     assert not ok
-    assert "tower_x" in text and f"Bedoelde je: {full_id('tower_x')}" in text
+    assert "tower_x" in text and f"Did you mean: {full_id('tower_x')}" in text
 
 
 def test_check_normalises_schema_ids_without_the_store(tmp_path):
@@ -261,11 +261,11 @@ def test_check_normalises_schema_ids_without_the_store(tmp_path):
     finally:
         server.stop()
     assert ok, text
-    assert full_id("tower_x") in text  # de lijst toont het ID zoals het in signals.json en de aanroepen moet
+    assert full_id("tower_x") in text  # the list shows the ID as it must appear in signals.json and the calls
 
 
 def listed_channels(text):
-    """Welke kanalen staan als rij in de kanalenlijst (andere stappen noemen ze ook, maar niet aan het begin van de regel)."""
+    """Which channels appear as a row in the channel list (other steps mention them too, but not at the start of the line)."""
     rows = [line.strip() for line in text.splitlines()]
     return {name for name in CHANNELS if any(row.startswith(full_id(name)) for row in rows)}
 
@@ -275,12 +275,12 @@ def test_check_lists_and_filters_channels(files, fake):
     assert listed_channels(everything) == set(CHANNELS) and TEXT_CHANNEL[1] in everything
     _, filtered = run_check(files, fake, grep="tower")
     assert listed_channels(filtered) == {"tower_x", "tower_y"}
-    assert f"2 van {len(CHANNELS) + 1} kanalen" in filtered  # de kanalen van de fake plus het tekstkanaal
+    assert f"2 of {len(CHANNELS) + 1} channels" in filtered  # the fake's channels plus the text channel
 
 
 def test_check_reads_an_explicit_channel(files, fake):
     ok, text = run_check(files, fake, channel_ids=[full_id("pressure_bore_skid1")], minutes=0.5)
-    assert ok and f"{full_id('pressure_bore_skid1')}" in text and "Meetreeks van 0.5 min" in text
+    assert ok and f"{full_id('pressure_bore_skid1')}" in text and "Reading a 0.5 min series" in text
 
 
 def test_check_warns_when_the_newest_data_is_old(tmp_path):
@@ -290,24 +290,24 @@ def test_check_warns_when_the_newest_data_is_old(tmp_path):
     finally:
         server.stop()
     assert ok, text
-    assert "NO DATA" in text and "5 min" in text and "rijen" in text  # wel gelezen: venster eindigt bij de laatste meting
+    assert "NO DATA" in text and "5 min" in text and "rows" in text  # it is read anyway: the window ends at the last measurement
 
 
 def test_check_flags_a_server_with_another_time_unit(tmp_path):
-    server = FakeIbaHd(timestamp_scale=10)  # tijdstempels in 100 ns-ticks i.p.v. µs
+    server = FakeIbaHd(timestamp_scale=10)  # timestamps in 100 ns ticks instead of µs
     try:
         ok, text = run_check(write_files(tmp_path, server), server)
     finally:
         server.stop()
     assert not ok
-    assert "geen microseconden sinds 1970" in text
+    assert "is not microseconds since 1970" in text
 
 
 def test_check_wrong_api_key(tmp_path, fake):
     ok, text = run_check(write_files(tmp_path, fake, api_key="not-the-key"), fake)
     assert not ok
     assert "UNAUTHENTICATED" in text and "ApiKey" in text
-    assert "Laatste waarde" not in text  # stopt bij de eerste fout
+    assert "Last value" not in text  # stops at the first error
 
 
 def test_check_hostname_not_in_certificate(tmp_path):
@@ -317,8 +317,8 @@ def test_check_hostname_not_in_certificate(tmp_path):
     finally:
         server.stop()
     assert not ok
-    assert "Host 'localhost' staat niet in het certificaat" in text  # al gewaarschuwd vóór de verbinding
-    assert "Waarschijnlijk de hostnaam" in text and "UNAVAILABLE" in text
+    assert "Host 'localhost' is not in the certificate" in text  # already warned before connecting
+    assert "Probably the hostname" in text and "UNAVAILABLE" in text
 
 
 def test_check_server_not_running(tmp_path):
@@ -327,17 +327,17 @@ def test_check_server_not_running(tmp_path):
     server.stop()
     ok, text = run_check(files, server)
     assert not ok
-    assert "Geen TCP-verbinding" in text and "Inloggen" not in text
+    assert "No TCP connection" in text and "Logging in" not in text
 
 
 def test_check_without_quick_connect_file(tmp_path):
     lines = []
     assert not ibahd_check.run(tmp_path / "missing.json", tmp_path / "signals.json", out=lines.append)
-    assert "niet gevonden" in "\n".join(lines)
+    assert "not found" in "\n".join(lines)
 
 
 def test_check_command_line(files, capsys):
     qc, sm = files
     assert ibahd_check.main(["--quick-connect", str(qc), "--signal-map", str(sm), "--minutes", "0.2"]) == 0
-    assert "Resultaat: verbinding werkt" in capsys.readouterr().out
+    assert "Result: connection works" in capsys.readouterr().out
     assert ibahd_check.main(["--quick-connect", str(qc.with_name("nope.json")), "--signal-map", str(sm)]) == 1

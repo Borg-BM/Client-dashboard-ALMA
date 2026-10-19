@@ -1,12 +1,12 @@
-# Start het dashboard lokaal op de live UDP-bron, met telegrammen van een echte iba (ibaPDA).
-# Gebruik:  .\demo-udp.ps1 -Sources 10.0.0.5        daarna  http://localhost:8000  (stoppen: Ctrl+C)
-#   -Sources  IP-adres van de ibaPDA-machine zoals deze computer het ziet (komma-gescheiden mag ook).
-#             Controleer het eerst met:  .\.venv\Scripts\python.exe -m alma.udp_check
-#   -Port     UDP-poort waar ibaPDA naartoe stuurt (standaard 5005).
-# De cache vult zich vanaf nul: na een minuut staat er een minuut in de grafieken.
-# Alleen voor lokaal gebruik: de login staat hier bewust uit en de webpagina luistert alleen op localhost.
-# De UDP-poort luistert op alle adressen, maar neemt alleen telegrammen van -Sources aan. Windows vraagt
-# bij de eerste keer om UDP-verkeer voor python.exe toe te staan in de firewall.
+# Start the dashboard locally on the live UDP source, with telegrams from a real iba (ibaPDA).
+# Usage:  .\demo-udp.ps1 -Sources 10.0.0.5        then  http://localhost:8000  (stop: Ctrl+C)
+#   -Sources  IP address of the ibaPDA machine as this computer sees it (comma-separated is also allowed).
+#             Check it first with:  .\.venv\Scripts\python.exe -m alma.udp_check
+#   -Port     UDP port that ibaPDA sends to (default 5005).
+# The cache fills up from zero: after a minute the charts show a minute of data.
+# For local use only: the login is deliberately disabled here and the web page only listens on localhost.
+# The UDP port listens on all addresses, but only accepts telegrams from -Sources. The first time, Windows
+# asks to allow UDP traffic for python.exe in the firewall.
 param(
     [Parameter(Mandatory = $true)][string]$Sources,
     [int]$Port = 5005

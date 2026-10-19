@@ -16,19 +16,19 @@ from alma.config import ROOT, SKIDS, Settings, get_settings
 from alma.sources import create_source
 from alma.sources.base import SourceUnavailable
 
-MAX_WINDOW_MINUTES = 60  # bovengrens van ?minutes= bij alle endpoints
-MIN_WINDOW_MINUTES = 0.25  # ondergrens (15 s): een torenoscillatie duurt ~6 s, dus minder zegt niets
+MAX_WINDOW_MINUTES = 60  # upper bound of ?minutes= on all endpoints
+MIN_WINDOW_MINUTES = 0.25  # lower bound (15 s): a tower oscillation lasts ~6 s, so anything shorter says nothing
 MAX_ANALYSIS_POINTS = 40_000
 MAX_CHART_POINTS = 2_000
-LIVE_SECONDS = 10  # staart van de joystick-cirkels
-BASELINE_TTL_S = 15  # hoe lang het nulpunt van de afwijking gecached blijft
-UNAVAILABLE_LOG_EVERY_S = 60  # dezelfde bronfout hooguit zo vaak loggen
+LIVE_SECONDS = 10  # trail of the joystick circles
+BASELINE_TTL_S = 15  # how long the zero point of the deviation stays cached
+UNAVAILABLE_LOG_EVERY_S = 60  # log the same source error at most this often
 
 log = logging.getLogger("alma")
 
 
 def _configure_logging() -> None:
-    """Uvicorn configureert alleen zijn eigen loggers; zorg dat alma.* zichtbaar is in `docker logs`."""
+    """Uvicorn only configures its own loggers; make sure alma.* is visible in `docker logs`."""
     if not log.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
@@ -42,7 +42,7 @@ def _add_security_headers(app: FastAPI, settings: Settings) -> None:
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "same-origin",
-        "Cache-Control": "no-store",  # alles hier is gebruikersgebonden of live data
+        "Cache-Control": "no-store",  # everything here is user-specific or live data
     }
     if settings.public_is_https:
         headers["Strict-Transport-Security"] = "max-age=31536000"
@@ -62,7 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Een live bron (UDP) opent hier zijn socket: mislukt dat (poort bezet), dan start de app niet.
+        # A live source (UDP) opens its socket here: if that fails (port in use), the app does not start.
         start = getattr(source, "start", None)
         if callable(start):
             start()
@@ -73,7 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if callable(stop):
                 stop()
 
-    # Geen /docs of /openapi.json: Swagger UI laadt scripts van een CDN en past niet bij onze CSP.
+    # No /docs or /openapi.json: Swagger UI loads scripts from a CDN and does not fit our CSP.
     app = FastAPI(
         title="ALMA BM010 dashboard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
@@ -81,7 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     compensating = settings.compensating_modes
 
     def load(minutes: float):
-        """Venster met afwijkingen t.o.v. het gemiddelde over dat venster."""
+        """Window with deviations relative to the mean over that window."""
         end = datetime.now(timezone.utc)
         raw = source.read(end - timedelta(minutes=minutes), end, MAX_ANALYSIS_POINTS)
         return analysis.add_derived(raw, settings.cylinder, compensating=compensating)
@@ -90,15 +90,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     baselines_lock = threading.Lock()
 
     def baseline_for(minutes: float) -> dict | None:
-        """Nulpunt van de afwijking voor het gekozen venster. Kort gecached, zodat de joystick die
-        elke seconde ververst niet steeds het hele venster bij de bron ophaalt."""
+        """Zero point of the deviation for the chosen window. Cached briefly, so the joystick, which
+        refreshes every second, does not fetch the whole window from the source every time."""
         now = time.monotonic()
         with baselines_lock:
             cached = baselines.get(minutes)
             if cached and now - cached[0] < BASELINE_TTL_S:
                 return cached[1]
             for stale in [k for k, (at, _) in baselines.items() if now - at >= BASELINE_TTL_S]:
-                del baselines[stale]  # het venster is een kommagetal: oude sleutels opruimen houdt de cache klein
+                del baselines[stale]  # the window is a float: cleaning up old keys keeps the cache small
         end = datetime.now(timezone.utc)
         raw = source.read(end - timedelta(minutes=minutes), end, MAX_ANALYSIS_POINTS)
         value = analysis.motion_baseline(raw) if len(raw) else None
@@ -114,29 +114,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(SourceUnavailable)
     async def source_unavailable(request: Request, exc: SourceUnavailable):
-        # De pagina ververst elke seconde: log dezelfde fout niet bij elke aanvraag opnieuw.
+        # The page refreshes every second: do not log the same error again on every request.
         now = time.monotonic()
         message = str(exc)
         if message != last_logged["message"] or now - last_logged["at"] > UNAVAILABLE_LOG_EVERY_S:
-            log.warning("Databron niet beschikbaar: %s", message)
+            log.warning("Data source unavailable: %s", message)
             last_logged.update(message=message, at=now)
-        return JSONResponse({"detail": "Databron niet beschikbaar"}, status_code=503)
+        return JSONResponse({"detail": "Data source unavailable"}, status_code=503)
 
     @app.get("/healthz")
     def healthz():
-        """Publiek, voor de Docker-healthcheck; geeft bewust niets over de configuratie weg."""
+        """Public, for the Docker healthcheck; deliberately reveals nothing about the configuration."""
         return {"status": "ok"}
 
     @app.get("/api/health")
     def health():
-        # retention_minutes: hoe ver terug de bron data heeft; de frontend biedt geen langere perioden aan.
+        # retention_minutes: how far back the source has data; the frontend offers no longer periods.
         body = {
             "status": "ok",
             "source": source.name,
             "retention_minutes": min(MAX_WINDOW_MINUTES, int(getattr(source, "retention_minutes", MAX_WINDOW_MINUTES))),
         }
         stats = getattr(source, "stats", None)
-        if callable(stats):  # bronnen met een live ingest (UDP) melden hier hun tellers
+        if callable(stats):  # sources with a live ingest (UDP) report their counters here
             body["ingest"] = stats()
         return body
 
@@ -160,8 +160,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/live")
     def live(minutes: float = Query(10, ge=MIN_WINDOW_MINUTES, le=MAX_WINDOW_MINUTES)):
-        """Actuele stand voor de statusbalk en de joystick-cirkels: de systeemmodus, compensatie aan/uit, de
-        laatste afwijking van toren en schip, en een korte staart van de afgelopen seconden."""
+        """Current state for the status bar and the joystick circles: the system mode, compensation on/off, the
+        latest deviation of tower and vessel, and a short trail of the past seconds."""
         end = datetime.now(timezone.utc)
         recent = source.read(end - timedelta(seconds=LIVE_SECONDS), end, 2_000)
         baseline = baseline_for(minutes)
@@ -192,12 +192,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_auth(app, settings)
     _add_security_headers(app, settings)
 
-    # Als laatste: vangt alles op wat hierboven niet matcht. De auth-poort dekt ook deze bestanden.
+    # Last: catches everything that does not match above. The auth gate also covers these files.
     app.mount("/", StaticFiles(directory=ROOT / "frontend", html=True), name="frontend")
     log.info(
-        "ALMA dashboard gestart (bron=%s, inloggen=%s, publieke URL=%s)",
+        "ALMA dashboard started (source=%s, login=%s, public URL=%s)",
         source.name,
-        "aan" if settings.auth_enabled else "UIT",
+        "on" if settings.auth_enabled else "OFF",
         urlsplit(settings.public_url).netloc,
     )
     return app

@@ -1,8 +1,8 @@
-"""Een minimale nep-Authentik voor tests: discovery, JWKS, token- en userinfo-endpoint.
+"""A minimal fake Authentik for tests: discovery, JWKS, token and userinfo endpoints.
 
-Draait in-process via respx (de uitgaande httpx-aanvragen van de app worden onderschept), dus de
-app gebruikt zijn echte Authlib-code zonder netwerk. De nep-IdP controleert zelf PKCE, de
-client-authenticatie en de redirect_uri, en kan bewust foute tokens uitgeven (self.tamper).
+Runs in-process via respx (the app's outgoing httpx requests are intercepted), so the
+app uses its real Authlib code without a network. The fake IdP checks PKCE, the
+client authentication and the redirect_uri itself, and can deliberately issue bad tokens (self.tamper).
 """
 
 import base64
@@ -35,9 +35,9 @@ def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-# Sleutels genereren is traag; één keer per testrun is genoeg.
+# Generating keys is slow; once per test run is enough.
 SIGNING_KEY = RSAKey.generate_key(2048, parameters={"kid": "idp-key", "use": "sig"})
-OTHER_KEY = RSAKey.generate_key(2048, parameters={"kid": "idp-key", "use": "sig"})  # zelfde kid, andere sleutel
+OTHER_KEY = RSAKey.generate_key(2048, parameters={"kid": "idp-key", "use": "sig"})  # same kid, different key
 
 
 class FakeIdp:
@@ -48,7 +48,7 @@ class FakeIdp:
         self.access_tokens: dict[str, dict] = {}
         self.token_requests: list[dict] = []
         self.groups_in_id_token = True
-        # Mogelijke waarden: nonce, signature, expired, issuer, audience, hs256, no_id_token
+        # Possible values: nonce, signature, expired, issuer, audience, hs256, no_id_token
         self.tamper: set[str] = set()
 
         router.get(f"{ISSUER}.well-known/openid-configuration").mock(
@@ -76,14 +76,14 @@ class FakeIdp:
         router.get(f"{IDP}/application/o/userinfo/").mock(side_effect=self._userinfo)
 
     def authorize(self, location: str, user: dict = USER) -> str:
-        """Wat de browser doet nadat de gebruiker bij de IdP heeft ingelogd; geeft de callback-URL."""
+        """What the browser does after the user has logged in at the IdP; returns the callback URL."""
         url = urlsplit(location)
         assert f"{url.scheme}://{url.netloc}{url.path}" == f"{IDP}/application/o/authorize/", location
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         assert q["response_type"] == "code"
         assert q["client_id"] == CLIENT_ID
         assert q["redirect_uri"] == f"{PUBLIC}/auth/callback"
-        assert q["code_challenge_method"] == "S256", "PKCE (S256) moet aan staan"
+        assert q["code_challenge_method"] == "S256", "PKCE (S256) must be enabled"
         assert "openid" in q["scope"].split()
         assert q["state"] and q["nonce"]
         code = secrets.token_urlsafe(16)
@@ -101,7 +101,7 @@ class FakeIdp:
         expected = "Basic " + base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
         if request.headers.get("authorization") != expected:
             return httpx.Response(401, json={"error": "invalid_client"})
-        grant = self.codes.pop(form.get("code", ""), None)  # een code werkt maar één keer
+        grant = self.codes.pop(form.get("code", ""), None)  # a code works only once
         if grant is None or form.get("grant_type") != "authorization_code" or form.get("redirect_uri") != grant["redirect_uri"]:
             return httpx.Response(400, json={"error": "invalid_grant"})
         if b64url(hashlib.sha256(form.get("code_verifier", "").encode()).digest()) != grant["challenge"]:
@@ -126,7 +126,7 @@ class FakeIdp:
             "at_hash": b64url(hashlib.sha256(access_token.encode()).digest()[:16]),
             **{k: v for k, v in user.items() if k != "groups" or self.groups_in_id_token},
         }
-        if "hs256" in self.tamper:  # wat Authentik doet zonder gekozen signing key
+        if "hs256" in self.tamper:  # what Authentik does without a chosen signing key
             return jwt.encode({"alg": "HS256"}, claims, OctKey.import_key(CLIENT_SECRET))
         key = self.other_key if "signature" in self.tamper else self.key
         return jwt.encode({"alg": "RS256", "kid": "idp-key"}, claims, key)

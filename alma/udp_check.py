@@ -1,15 +1,15 @@
-"""Controleer de eerste verbinding met iba: luister een paar seconden op de UDP-poort en laat zien wie er
-stuurt, hoe vaak en hoe regelmatig, of de telegrammen bij het formaat passen en welke waarden erin zitten.
+"""Check the first connection with iba: listen on the UDP port for a few seconds and show who is sending,
+how often and how regularly, whether the telegrams fit the format and which values they contain.
 
-    python -m alma.udp_check                  luister 10 s op de poort uit de instellingen
-    python -m alma.udp_check --dump           toon ook de ruwe bytes van het eerste telegram
+    python -m alma.udp_check                  listen for 10 s on the port from the settings
+    python -m alma.udp_check --dump           also show the raw bytes of the first telegram
     python -m alma.udp_check --port 5006 --seconds 30
 
-De tool opent de poort zelf: stop het dashboard eerst, of kies een andere poort met --port. Hij filtert
-niet op bronadres; het rapport noemt de adressen die je in ALMA_UDP_ALLOWED_SOURCES moet zetten.
+The tool opens the port itself: stop the dashboard first, or choose another port with --port. It does not
+filter on source address; the report names the addresses you need to put in ALMA_UDP_ALLOWED_SOURCES.
 
-Afsluitcode: 0 = telegrammen ontvangen en ze passen; 1 = ze komen binnen maar passen niet (of het formaat is
-ongeldig); 2 = niets ontvangen of de poort kon niet worden geopend.
+Exit code: 0 = telegrams received and they fit; 1 = they arrive but do not fit (or the format is
+invalid); 2 = nothing received or the port could not be opened.
 """
 
 import argparse
@@ -31,7 +31,7 @@ MAX_DUMP_ROWS = 128
 
 @dataclass
 class Sender:
-    """Alles wat we van een bronadres zien."""
+    """Everything we see from one source address."""
 
     packets: int = 0
     ports: set[int] = field(default_factory=set)
@@ -68,8 +68,8 @@ class Sender:
 
 
 def _defaults() -> tuple[str, int, Path]:
-    """Poort, adres en formaatbestand uit de instellingen (.env en omgeving), zonder dat een andere
-    ALMA_SOURCE of een ontbrekende login de tool in de weg zit."""
+    """Port, address and format file from the settings (.env and environment), without another
+    ALMA_SOURCE or a missing login getting in the tool's way."""
     try:
         settings = Settings(source="mock", auth_enabled=False)
     except ValueError:
@@ -78,7 +78,7 @@ def _defaults() -> tuple[str, int, Path]:
 
 
 def listen(sock: socket.socket, seconds: float, fmt: PacketFormat | None) -> tuple[dict[str, Sender], float]:
-    """Luister `seconds` lang (of tot Ctrl+C); geef de afzenders per IP en de werkelijke duur."""
+    """Listen for `seconds` (or until Ctrl+C); return the senders per IP and the actual duration."""
     senders: dict[str, Sender] = {}
     buffer = bytearray(MAX_PACKET_BYTES + 1)
     started = time.monotonic()
@@ -93,36 +93,36 @@ def listen(sock: socket.socket, seconds: float, fmt: PacketFormat | None) -> tup
             arrived = time.monotonic()
             senders.setdefault(address[0], Sender()).add(address, bytes(buffer[:size]), arrived, fmt)
     except KeyboardInterrupt:
-        print("\nOnderbroken; dit is het rapport tot nu toe.")
+        print("\nInterrupted; this is the report so far.")
     return senders, time.monotonic() - started
 
 
 def _rhythm(sender: Sender) -> str:
     if sender.packets < 2:
-        return "te weinig telegrammen voor een ritme"
+        return "too few telegrams for a rhythm"
     gaps = [b - a for a, b in zip(sender.arrivals, sender.arrivals[1:])]
     span = sender.arrivals[-1] - sender.arrivals[0]
     rate = (sender.packets - 1) / span if span > 0 else math.inf
     return (
-        f"{rate:.1f} per seconde; interval mediaan {statistics.median(gaps) * 1000:.0f} ms, "
-        f"langste gat {max(gaps) * 1000:.0f} ms"
+        f"{rate:.1f} per second; interval median {statistics.median(gaps) * 1000:.0f} ms, "
+        f"longest gap {max(gaps) * 1000:.0f} ms"
     )
 
 
 def _print_sender(host: str, sender: Sender, fmt: PacketFormat | None) -> None:
     ports = ", ".join(str(p) for p in sorted(sender.ports))
-    print(f"Bron {host} (poort {ports})")
-    print(f"  telegrammen   : {sender.packets}; {_rhythm(sender)}")
+    print(f"Source {host} (port {ports})")
+    print(f"  telegrams     : {sender.packets}; {_rhythm(sender)}")
     sizes = ", ".join(f"{size} bytes ({n}x)" for size, n in sorted(sender.sizes.items()))
-    wanted = "" if fmt is None else f"  [formaat verwacht {fmt.packet_bytes} bytes]"
-    print(f"  lengte        : {sizes}{wanted}")
+    wanted = "" if fmt is None else f"  [format expects {fmt.packet_bytes} bytes]"
+    print(f"  length        : {sizes}{wanted}")
     if fmt is None:
         return
-    print(f"  passen bij het formaat: {sender.fits} van {sender.packets}")
+    print(f"  fit the format: {sender.fits} of {sender.packets}")
     for reason, n in sender.errors.most_common(3):
-        print(f"    {n}x geweigerd: {reason}")
+        print(f"    {n}x refused: {reason}")
     if sender.fits:
-        print(f"  {'signaal':<22}{'min':>12}{'gemiddeld':>12}{'max':>12}{'laatst':>12}")
+        print(f"  {'signal':<22}{'min':>12}{'mean':>12}{'max':>12}{'last':>12}")
         for name in fmt.signals:
             mean = sender.total[name] / sender.fits
             print(
@@ -132,10 +132,10 @@ def _print_sender(host: str, sender: Sender, fmt: PacketFormat | None) -> None:
 
 
 def dump(packet: bytes, step: int = 4) -> str:
-    """De bytes van een telegram als tabel: per offset de vier bytes als hex en als float32 en int32, in
-    beide byte-volgordes. Met het oog is hier een verkeerde offset of byte-volgorde in te vinden."""
+    """The bytes of a telegram as a table: per offset the four bytes as hex and as float32 and int32, in
+    both byte orders. By eye, a wrong offset or byte order can be spotted here."""
     lines = [
-        f"Telegram van {len(packet)} bytes: {packet.hex(' ')}",
+        f"Telegram of {len(packet)} bytes: {packet.hex(' ')}",
         f"{'offset':>6}  {'bytes':<11}{'FLOAT big':>14}{'FLOAT little':>14}{'DINT big':>13}{'DINT little':>13}",
     ]
     offsets = range(0, len(packet) - 3, step)
@@ -147,7 +147,7 @@ def dump(packet: bytes, step: int = 4) -> str:
             f"{offset:>6}  {chunk.hex(' '):<11}{big_f:>14.5g}{little_f:>14.5g}{big_i:>13d}{little_i:>13d}"
         )
     if len(offsets) > MAX_DUMP_ROWS:
-        lines.append(f"... alleen de eerste {MAX_DUMP_ROWS} regels; kies een grotere --step voor de rest")
+        lines.append(f"... only the first {MAX_DUMP_ROWS} rows; choose a larger --step for the rest")
     return "\n".join(lines)
 
 
@@ -165,48 +165,48 @@ def _open(bind: str, port: int) -> socket.socket:
 def main(argv: list[str] | None = None) -> int:
     default_bind, default_port, default_format = _defaults()
     parser = argparse.ArgumentParser(
-        prog="python -m alma.udp_check", description="Luister op de UDP-poort en controleer de telegrammen van iba."
+        prog="python -m alma.udp_check", description="Listen on the UDP port and check the telegrams from iba."
     )
-    parser.add_argument("--port", type=int, default=default_port, help=f"UDP-poort (standaard {default_port})")
-    parser.add_argument("--bind", default=default_bind, help=f"luisteradres (standaard {default_bind})")
-    parser.add_argument("--seconds", type=float, default=10.0, help="hoe lang er wordt geluisterd (standaard 10)")
-    parser.add_argument("--format", type=Path, default=default_format, help="telegramformaat (udp_format.json)")
-    parser.add_argument("--dump", action="store_true", help="toon de ruwe bytes van het eerste telegram")
-    parser.add_argument("--step", type=int, choices=(1, 2, 4), default=4, help="afstand tussen de offsets bij --dump")
+    parser.add_argument("--port", type=int, default=default_port, help=f"UDP port (default {default_port})")
+    parser.add_argument("--bind", default=default_bind, help=f"listen address (default {default_bind})")
+    parser.add_argument("--seconds", type=float, default=10.0, help="how long to listen (default 10)")
+    parser.add_argument("--format", type=Path, default=default_format, help="telegram format (udp_format.json)")
+    parser.add_argument("--dump", action="store_true", help="show the raw bytes of the first telegram")
+    parser.add_argument("--step", type=int, choices=(1, 2, 4), default=4, help="offset spacing for --dump")
     args = parser.parse_args(argv)
 
     try:
         ipaddress.ip_address(args.bind)
     except ValueError:
-        parser.error("--bind moet een IP-adres zijn, bv. 0.0.0.0")
+        parser.error("--bind must be an IP address, e.g. 0.0.0.0")
 
     fmt: PacketFormat | None
     try:
         fmt = PacketFormat.load(args.format, required_signals=SIGNALS)
     except FormatError as err:
-        print(f"Het formaat is niet bruikbaar: {err}\nDe tool laat alleen zien wat er binnenkomt.\n")
+        print(f"The format is not usable: {err}\nThe tool will only show what arrives.\n")
         fmt = None
 
     try:
         sock = _open(args.bind, args.port)
     except OSError as err:
         print(
-            f"Kan UDP-poort {args.port} op {args.bind} niet openen ({err.strerror or err}). Stop het dashboard "
-            "(of een andere ontvanger) of kies een andere poort met --port."
+            f"Cannot open UDP port {args.port} on {args.bind} ({err.strerror or err}). Stop the dashboard "
+            "(or another receiver) or choose another port with --port."
         )
         return 2
 
-    print(f"Luisteren op {args.bind}:{sock.getsockname()[1]} gedurende {args.seconds:g} s (Ctrl+C om te stoppen)...\n")
+    print(f"Listening on {args.bind}:{sock.getsockname()[1]} for {args.seconds:g} s (Ctrl+C to stop)...\n")
     try:
         senders, elapsed = listen(sock, args.seconds, fmt)
     finally:
         sock.close()
 
     if not senders:
-        print(f"Niets ontvangen in {elapsed:.0f} s. Controleer:")
-        print(f"  - dat ibaPDA naar het IP-adres van deze machine stuurt, poort {args.port} (bij een VPN: het tunnel-IP);")
-        print("  - dat de firewall (Windows: inkomend UDP voor python.exe) deze poort toelaat;")
-        print("  - dat er geen ander programma op deze poort luistert en dat de uitvoermodule in ibaPDA actief is.")
+        print(f"Nothing received in {elapsed:.0f} s. Check:")
+        print(f"  - that ibaPDA sends to the IP address of this machine, port {args.port} (with a VPN: the tunnel IP);")
+        print("  - that the firewall (Windows: inbound UDP for python.exe) allows this port;")
+        print("  - that no other program is listening on this port and that the output module in ibaPDA is active.")
         return 2
 
     for host, sender in sorted(senders.items(), key=lambda item: -item[1].packets):
@@ -219,11 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     if fmt is None:
         return 1
     if all(s.fits == s.packets for s in senders.values()):
-        print("Alles past bij het formaat.")
-        print(f"Voor het dashboard: ALMA_UDP_ALLOWED_SOURCES={hosts}")
+        print("Everything fits the format.")
+        print(f"For the dashboard: ALMA_UDP_ALLOWED_SOURCES={hosts}")
         return 0
-    print("Niet alle telegrammen passen bij het formaat. Controleer lengte, offsets en byte-volgorde in ibaPDA")
-    print("en in udp_format.json; met --dump zie je de ruwe bytes in beide byte-volgordes.")
+    print("Not all telegrams fit the format. Check length, offsets and byte order in ibaPDA")
+    print("and in udp_format.json; with --dump you can see the raw bytes in both byte orders.")
     return 1
 
 

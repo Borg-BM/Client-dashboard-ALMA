@@ -1,13 +1,13 @@
-const CHART_REFRESH_MS = 5000; // grafieken: de hele gekozen periode
-const LIVE_REFRESH_MS = 1000; // statusbalk en joysticks: alleen de laatste seconden
-const HEALTH_REFRESH_MS = 30000; // bron en bewaartijd: verandert hooguit na een herstart van de server
-const STICK_RADIUS = 90; // straal van de buitenste ring in SVG-eenheden (= volle schaal)
+const CHART_REFRESH_MS = 5000; // charts: the whole selected period
+const LIVE_REFRESH_MS = 1000; // status bar and joysticks: only the last seconds
+const HEALTH_REFRESH_MS = 30000; // source and retention: changes at most after a server restart
+const STICK_RADIUS = 90; // radius of the outer ring in SVG units (= full scale)
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const minutes = () => $("minutes").value;
 
-// Sessie verlopen (401): de pagina opnieuw laden stuurt de gebruiker via /auth/login terug naar Authentik.
+// Session expired (401): reloading the page sends the user back to Authentik via /auth/login.
 let reloading = false;
 async function getJson(url) {
   const r = await fetch(url, { headers: { Accept: "application/json" } });
@@ -23,7 +23,7 @@ async function getJson(url) {
   return r.json();
 }
 
-// Herhaal fn pas ms na afloop van de vorige aanroep, zodat trage antwoorden niet opstapelen.
+// Repeat fn only ms after the previous call has finished, so slow responses do not pile up.
 function every(ms, fn) {
   const tick = async () => {
     if (!reloading) await fn();
@@ -37,9 +37,9 @@ function setFooter(text, isError = false) {
   $("footer").className = "footer" + (isError ? " error" : "");
 }
 
-// ---- Statusbalk: de systeemmodus -------------------------------------------------------------
+// ---- Status bar: the system mode --------------------------------------------------------------
 
-// Groen als het systeem kracht op de toren zet (compensatie aan: CT low, damping), rood in de andere modi.
+// Green when the system applies force to the tower (compensation on: CT low, damping), red in the other modes.
 const STATES = {
   on: "status--on",
   off: "status--off",
@@ -48,26 +48,26 @@ const STATES = {
 let currentStatus = null;
 function setStatus(state, text) {
   const label = text.toUpperCase();
-  if (currentStatus === state + label) return; // alleen bij een wijziging, anders leest een schermlezer elke seconde voor
+  if (currentStatus === state + label) return; // only on a change, otherwise a screen reader announces it every second
   currentStatus = state + label;
   $("status").className = "status " + STATES[state];
   $("status-label").textContent = label;
 }
 
-// ---- Grafieken ------------------------------------------------------------------------------
+// ---- Charts ---------------------------------------------------------------------------------
 
 const clock = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const clockShort = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-// Seconden tonen zolang de ticks dichter dan een minuut op elkaar staan, anders herhaalt elk label dezelfde minuut.
-// Dat hangt af van de data die er is, niet van de gekozen periode: een UDP-cache die net vult heeft maar seconden.
+// Show seconds as long as the ticks are closer together than a minute, otherwise every label repeats the same minute.
+// That depends on the data that is there, not on the selected period: a UDP cache that has just started filling only holds seconds.
 function timeLabels(u, splits, axisIdx, space, incr) {
   return splits.map((v) => (incr >= 60 ? clockShort : clock).format(v * 1000));
 }
 
-// [kolom in /api/timeseries, naam, kleurtoken, opties]. X en Y houden in alle grafieken dezelfde kleur; skid 1
-// trekt in X en skid 2 in Y, dus ze delen de kleur van die richting. Opties: scale "y2" zet de lijn op de rechteras
-// (minSpan2 is de minimale hoogte daarvan), dash maakt de lijn gestippeld.
+// [column in /api/timeseries, name, colour token, options]. X and Y keep the same colour in all charts; skid 1
+// pulls in X and skid 2 in Y, so they share the colour of that direction. Options: scale "y2" puts the line on the
+// right axis (minSpan2 is its minimum span), dash makes the line dashed.
 const DASHED = { scale: "y2", dash: [6, 4] };
 const CHARTS = {
   overlay: {
@@ -91,7 +91,7 @@ const CHARTS = {
 };
 const charts = {}; // key -> { u: uPlot, active: [0/1, ...] }
 
-// Zonder minimale hoogte zoomt de as bij een vlak signaal in op de meetruis.
+// Without a minimum span the axis zooms in on the measurement noise when a signal is flat.
 function paddedRange(minSpan) {
   return (u, min, max) => {
     if (min == null || max == null) return [0, 1];
@@ -102,7 +102,7 @@ function paddedRange(minSpan) {
   };
 }
 
-// Groene achtergrond waar de compensatie aan stond: zo zie je direct het effect van het systeem.
+// Green background where compensation was on: this shows the effect of the system at a glance.
 function drawBands(u, active, color) {
   const ts = u.data[0];
   if (!ts || !ts.length || !active) return;
@@ -135,7 +135,7 @@ function buildChart(def, data) {
     {
       width: el.clientWidth || 600,
       height: chartHeight(),
-      padding: [8, 26, 0, 0], // rechts de helft van een tijdlabel, anders wordt het laatste label afgekapt
+      padding: [8, 26, 0, 0], // right: half a time label, otherwise the last label is cut off
       scales: {
         x: { time: true },
         y: { range: paddedRange(def.minSpan) },
@@ -186,10 +186,10 @@ function renderChart(key, data) {
 }
 
 async function refreshCharts() {
-  const m = minutes(); // de keuze kan veranderen terwijl de aanvraag loopt
+  const m = minutes(); // the selection can change while the request is running
   try {
     const data = await getJson(`/api/timeseries?minutes=${m}`);
-    if (m !== minutes()) return; // verouderd antwoord: de nieuwe keuze heeft een eigen aanvraag
+    if (m !== minutes()) return; // outdated response: the new selection has its own request
     for (const key of Object.keys(CHARTS)) renderChart(key, data);
     setFooter("updated " + clock.format(Date.now()));
   } catch (e) {
@@ -197,7 +197,7 @@ async function refreshCharts() {
   }
 }
 
-// Een ander kleurenschema (donker/licht) heeft andere kleuren nodig: grafieken opnieuw opbouwen.
+// A different colour scheme (dark/light) needs different colours: rebuild the charts.
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   for (const key of Object.keys(charts)) {
     charts[key].u.destroy();
@@ -206,7 +206,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   refreshCharts();
 });
 
-// ---- Joystick-cirkels -----------------------------------------------------------------------
+// ---- Joystick circles -----------------------------------------------------------------------
 
 const STICK_LABELS = { tower: "Tower", vessel: "Vessel" };
 
@@ -223,18 +223,18 @@ function renderStick(key, m) {
   }
   root.classList.remove("stick--stale");
 
-  // Meetwaarde (mm) naar SVG-eenheden; buiten de ring wordt het stipje op de rand vastgezet.
+  // Measured value (mm) to SVG units; outside the ring the dot is clamped to the edge.
   const scale = STICK_RADIUS / m.fullscale;
   const toSvg = ([x, y]) => {
     const px = x * scale;
-    const py = -y * scale; // SVG-y wijst omlaag, onze Y omhoog
+    const py = -y * scale; // SVG y points down, our Y points up
     const r = Math.hypot(px, py);
     return r > STICK_RADIUS ? [(px * STICK_RADIUS) / r, (py * STICK_RADIUS) / r] : [px, py];
   };
   const [dx, dy] = toSvg([m.x, m.y]);
   root.querySelector(".dot").style.transform = `translate(${dx}px, ${dy}px)`;
 
-  // Staart van de afgelopen seconden in drie stukken, die naar nu toe donkerder worden.
+  // Trail of the last seconds in three parts, getting darker towards now.
   const points = m.trail.map(toSvg);
   const third = Math.ceil(points.length / 3);
   [0, 1, 2].forEach((i) => {
@@ -254,7 +254,7 @@ async function refreshLive() {
   const m = minutes();
   try {
     const live = await getJson(`/api/live?minutes=${m}`);
-    if (m !== minutes()) return; // zie refreshCharts
+    if (m !== minutes()) return; // see refreshCharts
     if (!live.ready || live.stale) throw new Error("no current data");
     setStatus(live.compensation_active ? "on" : "off", live.mode.name);
     renderStick("tower", live.tower);
@@ -267,21 +267,21 @@ async function refreshLive() {
   }
 }
 
-// ---- Periode: alleen aanbieden wat de bron kan leveren --------------------------------------
+// ---- Period: only offer what the source can supply -----------------------------------------
 
-const PERIOD_STEPS = [0.5, 1, 2, 5, 10, 30, 60]; // minuten; een torenoscillatie duurt ~6 s, dus 1 minuut is de standaard
+const PERIOD_STEPS = [0.5, 1, 2, 5, 10, 30, 60]; // minutes; a tower oscillation lasts ~6 s, so 1 minute is the default
 const DEFAULT_PERIOD = 1;
 const periodLabel = (m) => (m < 1 ? `last ${Math.round(m * 60)} s` : `last ${m} min`);
-const MAX_PERIOD = 60; // langer dan dit weigert de API (422)
+const MAX_PERIOD = 60; // the API refuses anything longer than this (422)
 
-// De stappen tot en met retention, plus retention zelf als die er niet in zit (12 -> 1, 2, 5, 10, 12).
+// The steps up to and including retention, plus retention itself if it is not among them (12 -> 1, 2, 5, 10, 12).
 function periodChoices(retention) {
   const choices = PERIOD_STEPS.filter((m) => m <= retention);
   if (!choices.includes(retention)) choices.push(retention);
   return choices;
 }
 
-// 1 minuut als dat kan, anders de langste periode die er is.
+// 1 minute if possible, otherwise the longest period there is.
 function defaultPeriod(choices) {
   return choices.includes(DEFAULT_PERIOD) ? DEFAULT_PERIOD : choices[choices.length - 1];
 }
@@ -291,44 +291,44 @@ function refreshAll() {
   refreshLive();
 }
 
-// De HTML heeft vaste opties (10/30/60) als terugval. Zodra de bron meldt hoe ver terug ze data heeft komen
-// die in de plaats; zonder bruikbaar getal blijven ze staan.
+// The HTML has fixed options as a fallback. As soon as the source reports how far back it has data, those
+// take their place; without a usable number they stay.
 function applyRetention(value) {
   if (!Number.isInteger(value) || value < 1) return;
   const choices = periodChoices(Math.min(value, MAX_PERIOD));
   const select = $("minutes");
-  // Ongewijzigd laten staan: bij vervangen klapt een geopende keuzelijst dicht, en dit wordt steeds herhaald.
+  // Leave unchanged: replacing collapses an open drop-down, and this is repeated all the time.
   if (choices.join() === Array.from(select.options, (o) => o.value).join()) return;
   const before = Number(select.value);
   const selected = choices.includes(before) ? before : defaultPeriod(choices);
-  // selected-attribuut mee: zo is de keuze ook in een DOM-dump te zien
+  // include the selected attribute: that way the choice is also visible in a DOM dump
   select.replaceChildren(...choices.map((m) => new Option(periodLabel(m), m, m === selected, m === selected)));
-  if (selected !== before) refreshAll(); // de grafieken tonen nog de oude periode: niet wachten op de volgende ronde
+  if (selected !== before) refreshAll(); // the charts still show the old period: do not wait for the next round
 }
 
-// ---- Gebruiker, bron en bewaartijd: fouten hier mogen het dashboard niet blokkeren -------------
+// ---- User, source and retention: errors here must not block the dashboard -----------------------
 
 async function loadUser() {
   try {
     const me = await getJson("/api/me");
     if (me.auth) {
-      $("user-name").textContent = me.name || me.username || ""; // textContent: nooit als HTML
+      $("user-name").textContent = me.name || me.username || ""; // textContent: never as HTML
       $("user").hidden = false;
     }
   } catch (e) {
-    /* getJson regelt 401; andere fouten laten we stil */
+    /* getJson handles 401; other errors stay silent */
   }
 }
 
-// Los van loadUser: een fout bij /api/me mag de demo-melding en de periodes niet tegenhouden. Een mislukte
-// aanvraag blijft stil; de vaste opties werken, en bij de volgende ronde proberen we het opnieuw.
+// Separate from loadUser: an error on /api/me must not hold back the demo banner and the periods. A failed
+// request stays silent; the fixed options work, and we try again in the next round.
 async function refreshHealth() {
   try {
     const health = await getJson("/api/health");
     $("demo-banner").hidden = health.source !== "mock";
     applyRetention(health.retention_minutes);
   } catch (e) {
-    /* getJson regelt 401 */
+    /* getJson handles 401 */
   }
 }
 

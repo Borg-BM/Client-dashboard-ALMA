@@ -20,7 +20,7 @@ SESSION_SECRET = "s" * 48
 
 @pytest.fixture
 def idp():
-    # assert_all_mocked (default): elke niet-gemockte uitgaande aanvraag laat de test falen
+    # assert_all_mocked (default): every outgoing request that is not mocked makes the test fail
     with respx.mock(assert_all_called=False) as router:
         yield FakeIdp(router)
 
@@ -54,16 +54,16 @@ def start_login(client, next_="/"):
 
 
 def log_in(client, idp, user=USER, next_="/"):
-    """Doorloopt de hele flow: login -> IdP -> callback. Geeft het callback-antwoord."""
+    """Runs the whole flow: login -> IdP -> callback. Returns the callback response."""
     callback_url = idp.authorize(start_login(client, next_), user)
     return client.get(callback_url)
 
 
-# --- de poort: alles dicht behalve de publieke paden ---------------------------------------
+# --- the gate: everything closed except the public paths ----------------------------------------
 
 
 def test_everything_requires_login(client):
-    assert client.get("/healthz").status_code == 200  # publiek, voor de Docker-healthcheck
+    assert client.get("/healthz").status_code == 200  # public, for the Docker healthcheck
 
     page = client.get("/")
     assert page.status_code == 302
@@ -75,20 +75,20 @@ def test_everything_requires_login(client):
     for path in ("/api/overview", "/api/timeseries", "/api/health", "/api/me", "/api/does-not-exist"):
         r = client.get(path)
         assert r.status_code == 401, path
-        assert r.json() == {"detail": "Niet ingelogd"}
+        assert r.json() == {"detail": "Not logged in"}
     assert client.post("/api/overview").status_code == 401
-    assert client.post("/").status_code == 401  # niet-GET krijgt geen redirect maar 401
+    assert client.post("/").status_code == 401  # non-GET gets a 401, not a redirect
 
 
 def test_path_tricks_do_not_bypass_gate(client):
-    # Exacte padvergelijking: een prefix als /auth/ geeft geen toegang tot iets anders.
+    # Exact path comparison: a prefix like /auth/ does not grant access to anything else.
     for path in ("/auth/../api/overview", "/auth/login/../../api/overview", "/healthz/../api/overview", "//api/overview"):
         r = client.get(path)
         assert r.status_code in (302, 401, 404), (path, r.status_code)
         assert "samples" not in r.text
 
 
-# --- de volledige login-flow -------------------------------------------------------------------
+# --- the complete login flow --------------------------------------------------------------------
 
 
 def test_full_login_flow_and_logout(client, idp):
@@ -96,7 +96,7 @@ def test_full_login_flow_and_logout(client, idp):
     assert callback.status_code == 302
     assert callback.headers["location"] == "/"
 
-    # PKCE: de verifier bij het token-endpoint hoort bij de challenge uit het authorize-verzoek
+    # PKCE: the verifier at the token endpoint matches the challenge from the authorize request
     assert idp.token_requests and idp.token_requests[-1]["code_verifier"]
 
     assert client.get("/").status_code == 200
@@ -113,8 +113,8 @@ def test_full_login_flow_and_logout(client, idp):
 
     out = client.post("/auth/logout")
     assert out.status_code == 303 and out.headers["location"] == "/auth/logged-out"
-    assert client.get("/api/me").status_code == 401  # sessie is weg
-    assert client.get("/auth/logged-out").status_code == 200  # publiek
+    assert client.get("/api/me").status_code == 401  # session is gone
+    assert client.get("/auth/logged-out").status_code == 200  # public
 
 
 def test_login_returns_to_requested_page(client, idp):
@@ -133,7 +133,7 @@ def test_session_cookie_attributes(client, idp):
     lowered = cookie.lower()
     assert cookie.startswith(f"{COOKIE}=")
     assert "httponly" in lowered and "secure" in lowered and "samesite=lax" in lowered
-    assert "path=/" in lowered and "domain" not in lowered  # voorwaarden voor het __Host- voorvoegsel
+    assert "path=/" in lowered and "domain" not in lowered  # requirements for the __Host- prefix
     assert "max-age=28800" in lowered
 
 
@@ -145,7 +145,7 @@ def test_session_cookie_name_is_plain_on_local_http(idp):
     assert cookie.startswith("alma_session=") and "secure" not in cookie.lower()
 
 
-# --- aanvallen op de flow ----------------------------------------------------------------------
+# --- attacks on the flow ------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("tamper", ["nonce", "signature", "expired", "issuer", "audience", "hs256", "no_id_token"])
@@ -153,7 +153,7 @@ def test_bad_id_token_is_rejected(client, idp, tamper):
     idp.tamper.add(tamper)
     r = log_in(client, idp)
     assert r.status_code in (400, 502), (tamper, r.status_code)
-    assert client.get("/api/me").status_code == 401  # niet ingelogd
+    assert client.get("/api/me").status_code == 401  # not logged in
 
 
 def test_state_mismatch_is_rejected(client, idp):
@@ -162,7 +162,7 @@ def test_state_mismatch_is_rejected(client, idp):
     forged = f"{parts.path}?code={parse_qs(parts.query)['code'][0]}&state=forged-state"
     r = client.get(forged)
     assert r.status_code == 400
-    assert idp.token_requests == []  # er is zelfs geen code ingewisseld
+    assert idp.token_requests == []  # no code was even exchanged
     assert client.get("/api/me").status_code == 401
 
 
@@ -183,7 +183,7 @@ def test_callback_cannot_be_replayed(client, idp):
     callback_url = idp.authorize(start_login(client))
     assert client.get(callback_url).status_code == 302
     client.post("/auth/logout")
-    assert client.get(callback_url).status_code == 400  # state/code zijn verbruikt
+    assert client.get(callback_url).status_code == 400  # state/code have been consumed
     assert client.get("/api/me").status_code == 401
 
 
@@ -229,8 +229,8 @@ def test_session_is_rejected_server_side_after_max_age(idp):
     log_in(client, idp)
     old_cookie = client.cookies[COOKIE]
     assert client.get("/api/me").status_code == 200
-    time.sleep(2.2)  # de cookie-timestamp heeft seconde-resolutie: > max_age + 1 s wachten
-    client.cookies.clear()  # zodat alleen de handtekening-controle van de server telt, niet de cookie-expiry
+    time.sleep(2.2)  # the cookie timestamp has one-second resolution: wait > max_age + 1 s
+    client.cookies.clear()  # so that only the server's signature check counts, not the cookie expiry
     r = client.get("/api/me", headers={"cookie": f"{COOKIE}={old_cookie}"})
     assert r.status_code == 401
 
@@ -243,7 +243,7 @@ def test_session_cookie_from_other_secret_is_rejected(idp):
     assert second.get("/api/me", headers={"cookie": f"{COOKIE}={stolen}"}).status_code == 401
 
 
-# --- autorisatie op groep ----------------------------------------------------------------------
+# --- authorization by group ---------------------------------------------------------------------
 
 
 def test_allowed_group_grants_access(idp):
@@ -258,7 +258,7 @@ def test_missing_group_is_denied_and_logged(idp, caplog):
         r = log_in(client, idp)
     assert r.status_code == 403
     assert client.get("/api/me").status_code == 401
-    assert "Toegang geweigerd" in caplog.text and "jan" in caplog.text
+    assert "Access denied" in caplog.text and "jan" in caplog.text
 
 
 def test_groups_fall_back_to_userinfo_endpoint(idp):
@@ -278,7 +278,7 @@ def test_no_group_restriction_by_default(idp):
     assert log_in(client, idp, user=user).status_code == 302
 
 
-# --- beschikbaarheid ---------------------------------------------------------------------------
+# --- availability -------------------------------------------------------------------------------
 
 
 def test_idp_down_gives_friendly_error_not_a_crash():
@@ -288,10 +288,10 @@ def test_idp_down_gives_friendly_error_not_a_crash():
         r = client.get("/auth/login")
         assert r.status_code == 502
         assert "Authentik" in r.text
-        assert client.get("/healthz").status_code == 200  # de app zelf blijft gezond
+        assert client.get("/healthz").status_code == 200  # the app itself stays healthy
 
 
-# --- beveiligingsheaders -----------------------------------------------------------------------
+# --- security headers ---------------------------------------------------------------------------
 
 
 def test_security_headers_on_every_kind_of_response(client, idp):
@@ -306,7 +306,7 @@ def test_security_headers_on_every_kind_of_response(client, idp):
         assert h["strict-transport-security"].startswith("max-age=")
 
 
-# --- configuratie: de app weigert te starten met een onveilige of onvolledige opzet ----------------
+# --- configuration: the app refuses to start with an unsafe or incomplete setup -----------------
 
 
 def test_settings_require_auth_values():
@@ -319,12 +319,12 @@ def test_settings_require_auth_values():
 @pytest.mark.parametrize(
     "overrides,fragment",
     [
-        ({"session_secret": "too-short"}, "minstens 32"),
+        ({"session_secret": "too-short"}, "at least 32"),
         ({"oidc_scopes": "profile email"}, "openid"),
         ({"public_url": "http://alma.example.com"}, "https"),
         ({"oidc_issuer": "http://auth.example.com/application/o/alma/"}, "https"),
-        ({"public_url": "https://alma.example.com/app"}, "pad"),
-        ({"public_url": "alma.example.com"}, "basis-URL"),
+        ({"public_url": "https://alma.example.com/app"}, "path"),
+        ({"public_url": "alma.example.com"}, "base URL"),
     ],
 )
 def test_settings_reject_unsafe_values(overrides, fragment):
@@ -336,7 +336,7 @@ def test_settings_reject_unsafe_values(overrides, fragment):
 def test_validation_errors_do_not_leak_secrets():
     with pytest.raises(ValidationError) as exc:
         make_settings(public_url="http://alma.example.com", oidc_client_secret="very-secret-client-value")
-    text = str(exc.value)  # dit is wat een mislukte start in `docker logs` laat zien
+    text = str(exc.value)  # this is what a failed start shows in `docker logs`
     assert "ALMA_PUBLIC_URL" in text
     assert "very-secret-client-value" not in text
     assert SESSION_SECRET not in text
@@ -351,6 +351,6 @@ def test_settings_accept_localhost_http_and_normalize_url():
 def test_auth_can_only_be_disabled_explicitly(caplog):
     with caplog.at_level(logging.WARNING, logger="alma.auth"):
         client = TestClient(create_app(Settings(_env_file=None, source="mock", auth_enabled=False)))
-    assert "INLOGGEN STAAT UIT" in caplog.text
+    assert "LOGIN IS DISABLED" in caplog.text
     assert client.get("/api/me").json() == {"auth": False}
     assert client.get("/api/overview").status_code == 200

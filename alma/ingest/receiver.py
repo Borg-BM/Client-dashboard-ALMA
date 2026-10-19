@@ -1,19 +1,19 @@
-"""De UDP-ontvanger: een thread met een eigen socket die telegrammen van iba decodeert en in de cache zet.
+"""The UDP receiver: a thread with its own socket that decodes telegrams from iba and puts them in the cache.
 
-Elk datagram krijgt een van vier uitkomsten, en elke uitkomst is een teller in stats():
+Each datagram has one of four outcomes, and each outcome is a counter in stats():
 
-    accepted   past bij het formaat en is opgeslagen
-    blocked    het bronadres staat niet in allowed_sources (None laat elk adres toe)
-    malformed  past niet bij het formaat (lengte, controlewoord, NaN of buiten min/max)
-    dropped    het formaat klopt, maar de cache weigerde de rij (tijdstip niet oplopend)
+    accepted   fits the format and has been stored
+    blocked    the source address is not in allowed_sources (None allows every address)
+    malformed  does not fit the format (length, check word, NaN or outside min/max)
+    dropped    the format is correct, but the cache refused the row (timestamp not increasing)
 
-De ontvanger doet per datagram niets zwaarders dan een filter, een struct-aanroep en een cache-append: het
-draait voor elk pakket, ook van wie de poort bestookt. Geweigerde telegrammen worden geteld en hooguit eens
-per minuut gelogd, zonder pakketinhoud.
+Per datagram the receiver does nothing heavier than a filter, a struct call and a cache append: it runs
+for every packet, including from whoever floods the port. Refused telegrams are counted and logged at most
+once per minute, without packet contents.
 
-De tijdstempel is de ontvangsttijd (clock). Heartbeat-detectie en een exacte verliesmeting uit een teller
-in het telegram zijn er nog niet: stats() meldt frozen=False en loss_percent=None, en UdpSource schat het
-verlies dan uit de aankomsttijden.
+The timestamp is the receive time (clock). Heartbeat detection and an exact loss measurement from a counter
+in the telegram do not exist yet: stats() reports frozen=False and loss_percent=None, and UdpSource then
+estimates the loss from the arrival times.
 """
 
 import ipaddress
@@ -30,9 +30,9 @@ __all__ = ["UdpReceiver"]
 
 log = logging.getLogger("alma.udp")
 
-POLL_S = 0.2  # hoe snel de thread merkt dat hij moet stoppen
-LOG_EVERY_S = 60  # hooguit een logregel per zoveel seconden voor geweigerde telegrammen
-RCVBUF_BYTES = 1 << 20  # ruim, zodat een korte stilstand van de thread geen telegrammen kost
+POLL_S = 0.2  # how quickly the thread notices it has to stop
+LOG_EVERY_S = 60  # at most one log line per this many seconds for refused telegrams
+RCVBUF_BYTES = 1 << 20  # generous, so a short stall of the thread does not cost telegrams
 
 
 class UdpReceiver:
@@ -50,17 +50,17 @@ class UdpReceiver:
         self._cache = cache
         self._bind = bind
         self._port = port
-        # None: elk bronadres; een lege lijst: niemand
+        # None: every source address; an empty list: nobody
         self._networks = (
             None if allowed_sources is None else tuple(ipaddress.ip_network(s, strict=False) for s in allowed_sources)
         )
         self._clock = clock
 
-        self._lock = threading.Lock()  # tellers en logteller; de thread schrijft, stats() leest
+        self._lock = threading.Lock()  # counters and log counter; the thread writes, stats() reads
         self._counts = {"received": 0, "accepted": 0, "dropped": 0, "blocked": 0, "malformed": 0}
         self._last_accepted: float | None = None
         self._unlogged = 0
-        self._last_log: float | None = None  # time.monotonic(), los van de (soms bediende) clock
+        self._last_log: float | None = None  # time.monotonic(), independent of the (sometimes test-driven) clock
 
         self._stop = threading.Event()
         self._sock: socket.socket | None = None
@@ -68,7 +68,7 @@ class UdpReceiver:
 
     @property
     def port(self) -> int:
-        """De poort waarop wordt geluisterd; na start() ook bij port=0 de door het systeem gekozen poort."""
+        """The port being listened on; after start() this is the system-chosen port, also for port=0."""
         return self._port
 
     @property
@@ -76,7 +76,7 @@ class UdpReceiver:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
-        """Open de socket en start de thread. Mislukt het openen (poort bezet), dan een RuntimeError."""
+        """Open the socket and start the thread. If opening fails (port in use), raise a RuntimeError."""
         if self.running:
             return
         family = socket.AF_INET6 if ipaddress.ip_address(self._bind).version == 6 else socket.AF_INET
@@ -85,13 +85,13 @@ class UdpReceiver:
             try:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RCVBUF_BYTES)
             except OSError:
-                pass  # een kleinere buffer is geen reden om niet te starten
-            sock.bind((self._bind, self._port))  # bewust zonder SO_REUSEADDR: een bezette poort moet opvallen
+                pass  # a smaller buffer is no reason not to start
+            sock.bind((self._bind, self._port))  # deliberately without SO_REUSEADDR: a port in use must be noticed
         except OSError as err:
             sock.close()
             raise RuntimeError(
-                f"Kan UDP-poort {self._port} op {self._bind} niet openen ({err.strerror or err}). Draait er al "
-                "een ander proces op die poort, zoals alma.udp_check of een tweede dashboard?"
+                f"Cannot open UDP port {self._port} on {self._bind} ({err.strerror or err}). Is another process "
+                "already running on that port, such as alma.udp_check or a second dashboard?"
             ) from err
         sock.settimeout(POLL_S)
         self._port = sock.getsockname()[1]
@@ -99,10 +99,10 @@ class UdpReceiver:
         self._sock = sock
         self._thread = threading.Thread(target=self._run, args=(sock, self._stop), name="udp-receiver", daemon=True)
         self._thread.start()
-        log.info("UDP-ontvanger luistert op %s:%d", self._bind, self._port)
+        log.info("UDP receiver listening on %s:%d", self._bind, self._port)
 
     def stop(self) -> None:
-        """Stop de thread en geef de poort vrij."""
+        """Stop the thread and release the port."""
         thread, sock = self._thread, self._sock
         if thread is None or sock is None:
             return
@@ -112,17 +112,17 @@ class UdpReceiver:
         self._thread = self._sock = None
 
     def stats(self) -> dict:
-        """Tellers van dit ene moment. last_packet_age_s is de leeftijd van het laatste geaccepteerde telegram."""
+        """Counters at this moment. last_packet_age_s is the age of the last accepted telegram."""
         with self._lock:
             counts = dict(self._counts)
             last = self._last_accepted
         age = None if last is None else round(max(0.0, self._clock() - last), 1)
         return {**counts, "last_packet_age_s": age, "frozen": False, "loss_percent": None}
 
-    # ---- de ontvangstlus -------------------------------------------------------------------------------
+    # ---- the receive loop ------------------------------------------------------------------------------
 
     def _run(self, sock: socket.socket, stop: threading.Event) -> None:
-        buffer = bytearray(MAX_PACKET_BYTES + 1)  # een datagram past er altijd in, dus er wordt niets afgekapt
+        buffer = bytearray(MAX_PACKET_BYTES + 1)  # a datagram always fits, so nothing is truncated
         view = memoryview(buffer)
         while not stop.is_set():
             try:
@@ -132,18 +132,18 @@ class UdpReceiver:
             except OSError as err:
                 if stop.is_set():
                     break
-                self._note(f"socketfout bij ontvangen: {err.strerror or type(err).__name__}")
-                time.sleep(POLL_S)  # niet in een lus op dezelfde fout blijven draaien
+                self._note(f"socket error while receiving: {err.strerror or type(err).__name__}")
+                time.sleep(POLL_S)  # do not keep looping on the same error
                 continue
             host = address[0]
             try:
                 self._handle(view[:size], host)
-            except Exception as err:  # de thread mag nooit stoppen door een enkel telegram
-                self._record("malformed", host, f"onverwachte fout bij verwerken: {type(err).__name__}")
+            except Exception as err:  # the thread must never stop because of a single telegram
+                self._record("malformed", host, f"unexpected error while processing: {type(err).__name__}")
 
     def _handle(self, data: memoryview, host: str) -> None:
         if not self._allowed(host):
-            self._record("blocked", host, "bronadres staat niet in ALMA_UDP_ALLOWED_SOURCES")
+            self._record("blocked", host, "source address is not in ALMA_UDP_ALLOWED_SOURCES")
             return
         now = self._clock()
         try:
@@ -152,7 +152,7 @@ class UdpReceiver:
             self._record("malformed", host, str(err))
             return
         if not self._cache.append(now, values):
-            self._record("dropped", host, "cache weigerde de rij (tijdstip niet oplopend of ongeldige waarde)")
+            self._record("dropped", host, "cache refused the row (timestamp not increasing or invalid value)")
             return
         with self._lock:
             self._counts["received"] += 1
@@ -160,7 +160,7 @@ class UdpReceiver:
             self._last_accepted = now
             first = self._counts["accepted"] == 1
         if first:
-            log.info("Eerste telegram ontvangen van %s", host)
+            log.info("First telegram received from %s", host)
 
     def _allowed(self, host: str) -> bool:
         if self._networks is None:
@@ -169,26 +169,26 @@ class UdpReceiver:
             ip = ipaddress.ip_address(host)
         except ValueError:
             return False
-        ip = getattr(ip, "ipv4_mapped", None) or ip  # een IPv4-afzender op een dual-stack socket
+        ip = getattr(ip, "ipv4_mapped", None) or ip  # an IPv4 sender on a dual-stack socket
         return any(ip in network for network in self._networks)
 
     def _record(self, outcome: str, host: str, reason: str) -> None:
-        """Tel een geweigerd telegram en log het hooguit eens per LOG_EVERY_S, zonder inhoud."""
+        """Count a refused telegram and log it at most once per LOG_EVERY_S, without contents."""
         with self._lock:
             self._counts["received"] += 1
             self._counts[outcome] += 1
             count = self._claim_log_slot()
         if count:
-            log.warning("%d telegram(men) geweigerd (laatste: %s, bron %s): %s", count, outcome, host, reason)
+            log.warning("%d telegram(s) refused (last: %s, source %s): %s", count, outcome, host, reason)
 
     def _note(self, reason: str) -> None:
         with self._lock:
             count = self._claim_log_slot()
         if count:
-            log.warning("UDP-ontvanger: %s", reason)
+            log.warning("UDP receiver: %s", reason)
 
     def _claim_log_slot(self) -> int:
-        """Onder het slot: hoeveel meldingen er nu gelogd mogen worden (0 = nog niet loggen)."""
+        """Under the lock: how many reports may be logged now (0 = do not log yet)."""
         self._unlogged += 1
         now = time.monotonic()
         if self._last_log is not None and now - self._last_log < LOG_EVERY_S:

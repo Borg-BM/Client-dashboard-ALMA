@@ -1,4 +1,4 @@
-"""De UDP-ontvanger met echte pakketten over loopback: filter, uitkomsten, tellers en de socket zelf."""
+"""The UDP receiver with real packets over loopback: filter, outcomes, counters and the socket itself."""
 
 import socket
 import time
@@ -46,14 +46,14 @@ def make():
 
 
 def send(receiver: UdpReceiver, *datagrams: bytes) -> None:
-    """Stuur de datagrammen en wacht tot de ontvanger ze een voor een heeft afgehandeld."""
+    """Send the datagrams and wait until the receiver has handled them one by one."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
         for datagram in datagrams:
             before = processed(receiver)
             sender.sendto(datagram, ("127.0.0.1", receiver.port))
             deadline = time.monotonic() + 2
             while processed(receiver) == before:
-                assert time.monotonic() < deadline, "telegram is niet verwerkt"
+                assert time.monotonic() < deadline, "telegram was not processed"
                 time.sleep(0.0005)
 
 
@@ -92,7 +92,7 @@ def test_other_senders_are_blocked_before_decoding(make, allowed):
 def test_telegrams_that_do_not_fit_are_counted_and_the_receiver_keeps_going(make):
     receiver, cache = make()
     good = FORMAT.encode(VALUES)
-    send(receiver, b"te kort", good + b"\x00", b"", bytes(MAX_PACKET_BYTES), good)
+    send(receiver, b"too short", good + b"\x00", b"", bytes(MAX_PACKET_BYTES), good)
     stats = receiver.stats()
     assert stats["malformed"] == 4 and stats["accepted"] == 1 and stats["received"] == 5
     assert len(cache) == 1 and receiver.running
@@ -109,7 +109,7 @@ def test_a_value_that_is_not_a_number_is_refused(make):
 def test_a_repeated_timestamp_is_dropped_by_the_cache(make):
     clock = Clock(1_700_000_000.0)
     receiver, cache = make(clock=clock)
-    send(receiver, FORMAT.encode(VALUES), FORMAT.encode(VALUES))  # de klok staat stil: zelfde tijdstip twee keer
+    send(receiver, FORMAT.encode(VALUES), FORMAT.encode(VALUES))  # the clock stands still: same timestamp twice
     stats = receiver.stats()
     assert stats["accepted"] == 1 and stats["dropped"] == 1 and stats["received"] == 2
     clock.now += 0.05
@@ -138,7 +138,7 @@ def test_a_taken_port_is_reported_in_plain_words():
     try:
         cache = SampleCache(SIGNALS, retention_s=60, max_samples=1_000)
         receiver = UdpReceiver(FORMAT, cache, bind="127.0.0.1", port=blocker.getsockname()[1], allowed_sources=None)
-        with pytest.raises(RuntimeError, match="UDP-poort"):
+        with pytest.raises(RuntimeError, match="UDP port"):
             receiver.start()
         assert not receiver.running
     finally:
@@ -151,8 +151,8 @@ def test_stop_frees_the_port_and_the_receiver_can_start_again(make):
     receiver.stop()
     assert not receiver.running
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as again:
-        again.bind(("127.0.0.1", port))  # de poort is vrij
-    receiver.stop()  # nog een keer stoppen mag
+        again.bind(("127.0.0.1", port))  # the port is free
+    receiver.stop()  # stopping again is allowed
     receiver.start()
     send(receiver, FORMAT.encode(VALUES))
     assert receiver.stats()["accepted"] == 1

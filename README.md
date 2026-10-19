@@ -1,114 +1,114 @@
-# ALMA BM010 klantdashboard
+# ALMA BM010 client dashboard
 
-Webdashboard voor het ALMA-systeem (BM010) dat oscillaties in een windmolenpaal tijdens de bouw
-tegengaat. Het toont de trilling van de toren met het systeem uit en aan, de demping, en een
-schatting van de kabelspanning op basis van de cilinderdruk. De metingen komen live binnen als
-UDP-telegrammen van iba (ibaPDA); de server bewaart de laatste minuten in het geheugen. Zolang er
-geen bron is draait de app op gesimuleerde data (met een DEMO-banner). De ibaHD-server (ibaHD-API)
-kan als bron voor historie dienen, maar levert niet in realtime.
+Web dashboard for the ALMA system (BM010), which counteracts oscillations in a wind turbine tower
+during construction. It shows the tower vibration with the system off and on, the damping, and an
+estimate of the cable tension based on the cylinder pressure. The measurements arrive live as UDP
+telegrams from iba (ibaPDA); the server keeps the last few minutes in memory. As long as there is no
+source, the app runs on simulated data (with a DEMO banner). The ibaHD server (ibaHD-API) can serve as
+a source for history, but does not deliver in real time.
 
-Inloggen gaat via Authentik (OpenID Connect). De app draait in Docker.
+Login goes through Authentik (OpenID Connect). The app runs in Docker.
 
-## Lokaal draaien (zonder Docker, zonder login)
+## Running locally (without Docker, without login)
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev]"          # voeg ,ibahd toe voor de echte ibaHD-bron
-$env:ALMA_AUTH_ENABLED = "false"               # alleen voor lokaal; zie 'Beveiliging'
+.venv\Scripts\pip install -e ".[dev]"          # add ,ibahd for the real ibaHD source
+$env:ALMA_AUTH_ENABLED = "false"               # local use only; see 'Security: how it works'
 .venv\Scripts\python -m uvicorn alma.main:app_factory --factory --port 8000
 ```
 
 Open <http://localhost:8000>. Tests: `.venv\Scripts\python -m pytest`.
 
-`.\demo.ps1` doet hetzelfde met gesimuleerde data. `.\demo-udp.ps1 -Sources <IP van ibaPDA>` start
-het dashboard op de live UDP-bron met telegrammen van een echte iba (zie 'Live data via UDP').
+`.\demo.ps1` does the same with simulated data. `.\demo-udp.ps1 -Sources <ibaPDA IP>` starts the
+dashboard on the live UDP source with telegrams from a real iba (see 'Live data via UDP').
 
-## Draaien in Docker
+## Running in Docker
 
 ```powershell
-copy .env.example .env      # vul de Authentik-gegevens en ALMA_SESSION_SECRET in
+copy .env.example .env      # fill in the Authentik details and ALMA_SESSION_SECRET
 docker compose up -d --build
 docker compose logs -f alma
 ```
 
-* De container luistert op `127.0.0.1:8000` van de host. Zet er een **reverse proxy met TLS** voor
-  (de publieke URL moet `https` zijn) en publiceer de poort nooit rechtstreeks op internet.
-* `ALMA_PUBLIC_URL` moet exact de URL zijn waarmee gebruikers het dashboard openen. Open de app
-  alleen via die URL: de sessiecookie hoort bij die hostnaam.
-* De app start niet als de logininstellingen ontbreken of onveilig zijn (te kort geheim, `http`
-  buiten localhost, enz.); de foutmelding in `docker compose logs` zegt wat er mist.
-* `GET /healthz` is publiek en wordt gebruikt voor de Docker-healthcheck.
-* De container draait als niet-root, met read-only bestandssysteem en zonder extra capabilities.
+* The container listens on `127.0.0.1:8000` of the host. Put a **reverse proxy with TLS** in front of it
+  (the public URL must be `https`) and never publish the port directly on the internet.
+* `ALMA_PUBLIC_URL` must be exactly the URL users open the dashboard with. Only open the app through
+  that URL: the session cookie belongs to that hostname.
+* The app does not start if the login settings are missing or insecure (secret too short, `http`
+  outside localhost, etc.); the error message in `docker compose logs` says what is missing.
+* `GET /healthz` is public and is used for the Docker healthcheck.
+* The container runs as non-root, with a read-only filesystem and without extra capabilities.
 
-## Authentik instellen
+## Setting up Authentik
 
-In de Authentik-adminomgeving (labels kunnen per Authentik-versie iets verschillen, zie de
-[OAuth2-providerdocumentatie](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/)):
+In the Authentik admin interface (labels can differ slightly per Authentik version, see the
+[OAuth2 provider documentation](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/)):
 
-1. Maak een **Application** met een **OAuth2/OpenID Provider** (slug bijvoorbeeld `alma`).
-2. Provider-instellingen:
-   * *Client type*: **confidential**. Kopieer *Client ID* en *Client Secret* naar `.env`.
-   * *Redirect URIs*: voeg exact `https://<ALMA_PUBLIC_URL host>/auth/callback` toe. Laat dit veld
-     niet leeg: dan onthoudt Authentik de eerste URL die erlangs komt.
-   * *Signing key*: **kies een certificaat** (bijvoorbeeld het zelfondertekende certificaat van
-     Authentik). Zonder signing key tekent Authentik met HS256 en publiceert het geen sleutel via
-     JWKS; de app weigert zulke tokens (inloggen mislukt dan met "kon niet worden gecontroleerd").
-   * *Scopes*: `openid`, `profile`, `email` (standaard). De groepen komen mee in de `profile`-scope.
-3. **Wie mag erin?** Koppel op de Application een *policy binding* met de groep(en) die toegang
-   mogen hebben. Zonder binding laat Authentik elke ingelogde gebruiker toe. Wil je dat de app dit
-   ook zelf controleert, zet dan `ALMA_ALLOWED_GROUPS=groep1,groep2` (namen uit de `groups`-claim).
-4. `ALMA_OIDC_ISSUER` is `https://<authentik-host>/application/o/<slug>/`. Staat de provider op
-   *global issuer mode*, gebruik dan de issuer uit het discovery-document
+1. Create an **Application** with an **OAuth2/OpenID Provider** (slug for example `alma`).
+2. Provider settings:
+   * *Client type*: **confidential**. Copy *Client ID* and *Client Secret* to `.env`.
+   * *Redirect URIs*: add exactly `https://<ALMA_PUBLIC_URL host>/auth/callback`. Do not leave this
+     field empty: Authentik would then remember the first URL that comes by.
+   * *Signing key*: **choose a certificate** (for example Authentik's self-signed certificate).
+     Without a signing key Authentik signs with HS256 and does not publish a key through JWKS; the
+     app rejects such tokens (login then fails with "could not be verified").
+   * *Scopes*: `openid`, `profile`, `email` (default). The groups come along in the `profile` scope.
+3. **Who gets in?** Bind a *policy* to the Application for the group(s) that may have access.
+   Without a binding Authentik admits every logged-in user. If you also want the app to check this
+   itself, set `ALMA_ALLOWED_GROUPS=group1,group2` (names from the `groups` claim).
+4. `ALMA_OIDC_ISSUER` is `https://<authentik-host>/application/o/<slug>/`. If the provider uses
+   *global issuer mode*, use the issuer from the discovery document
    (`.../application/o/<slug>/.well-known/openid-configuration`).
 
-## Configuratie
+## Configuration
 
-Alles via omgevingsvariabelen of `.env` (zie `.env.example`).
+Everything through environment variables or `.env` (see `.env.example`).
 
-| Variabele | Betekenis |
+| Variable | Meaning |
 | --- | --- |
-| `ALMA_SOURCE` | `mock` (gesimuleerd, DEMO-banner), `udp` (live van iba) of `ibahd` |
-| `ALMA_UDP_PORT` | UDP-poort voor de telegrammen van iba (standaard 5005); compose publiceert dezelfde poort |
-| `ALMA_UDP_PUBLISH` | Alleen compose: op welk IP van de host de UDP-poort wordt gepubliceerd (standaard `127.0.0.1`; zet het tunnel-IP van de server) |
-| `ALMA_UDP_ALLOWED_SOURCES` | Verplicht bij `udp`: IP's of netwerken (komma-gescheiden) waarvan telegrammen worden aangenomen |
-| `ALMA_UDP_ALLOW_ANY_SOURCE` | `true` laat elk bronadres toe; alleen voor lokale ontwikkeling, niet samen met het filter |
-| `ALMA_CACHE_MINUTES` | Hoeveel minuten metingen in het geheugen blijven (1-60, standaard 10); de periodekeuze volgt dit |
-| `ALMA_SYSTEM_MODES` | Welk modenummer van de PLC welke naam heeft, als JSON, bv. `{"0": "System off", "1": "HPU on", ...}`. De standaard (0-4: System off, HPU on, Position control, CT low, Damping) zijn **placeholders** |
-| `ALMA_COMPENSATING_MODES` | Modenummers (komma-gescheiden) die als 'compensatie aan' tellen: groene arcering en dempingspercentage (standaard `3,4` = CT low en damping) |
-| `ALMA_UDP_FORMAT` | Pad naar het telegramformaat (standaard `udp_format.json`) |
-| `ALMA_UDP_BIND`, `ALMA_UDP_MAX_SAMPLES` | Luisteradres (standaard `0.0.0.0`) en harde geheugengrens van de cache (standaard 200.000 metingen) |
-| `ALMA_PUBLIC_URL` | Externe basis-URL, `https`, zonder pad |
-| `ALMA_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | Authentik-provider |
-| `ALMA_SESSION_SECRET` | Minstens 32 tekens; wijzigen logt iedereen uit |
-| `ALMA_SESSION_MAX_AGE_S` | Levensduur van een sessie (standaard 8 uur, vanaf inloggen) |
-| `ALMA_ALLOWED_GROUPS` | Optioneel, komma-gescheiden groepen |
-| `ALMA_OIDC_SCOPES` | Standaard `openid profile email` |
-| `ALMA_AUTH_ENABLED` | `false` zet inloggen uit; alleen voor lokale ontwikkeling |
-| `ALMA_CYLINDER__BORE_DIAMETER_M` e.a. | Cilindergeometrie voor de kabelspanning (nu placeholders) |
-| `ALMA_IBAHD_QUICK_CONNECT`, `ALMA_SIGNAL_MAP` | Alleen bij `ibahd`; zie hieronder |
+| `ALMA_SOURCE` | `mock` (simulated, DEMO banner), `udp` (live from iba) or `ibahd` |
+| `ALMA_UDP_PORT` | UDP port for the telegrams from iba (default 5005); compose publishes the same port |
+| `ALMA_UDP_PUBLISH` | Compose only: on which host IP the UDP port is published (default `127.0.0.1`; set the server's tunnel IP) |
+| `ALMA_UDP_ALLOWED_SOURCES` | Required with `udp`: IPs or networks (comma-separated) from which telegrams are accepted |
+| `ALMA_UDP_ALLOW_ANY_SOURCE` | `true` allows any source address; for local development only, cannot be combined with the filter |
+| `ALMA_CACHE_MINUTES` | How many minutes of measurements stay in memory (1-60, default 10); the period selector follows this |
+| `ALMA_SYSTEM_MODES` | Which PLC mode number has which name, as JSON, e.g. `{"0": "System off", "1": "HPU on", ...}`. The defaults (0-4: System off, HPU on, Position control, CT low, Damping) are **placeholders** |
+| `ALMA_COMPENSATING_MODES` | Mode numbers (comma-separated) that count as 'compensation on': green shading and damping percentage (default `3,4` = CT low and damping) |
+| `ALMA_UDP_FORMAT` | Path to the telegram format (default `udp_format.json`) |
+| `ALMA_UDP_BIND`, `ALMA_UDP_MAX_SAMPLES` | Listen address (default `0.0.0.0`) and hard memory limit of the cache (default 200,000 samples) |
+| `ALMA_PUBLIC_URL` | External base URL, `https`, without a path |
+| `ALMA_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | Authentik provider |
+| `ALMA_SESSION_SECRET` | At least 32 characters; changing it logs everyone out |
+| `ALMA_SESSION_MAX_AGE_S` | Lifetime of a session (default 8 hours, from login) |
+| `ALMA_ALLOWED_GROUPS` | Optional, comma-separated groups |
+| `ALMA_OIDC_SCOPES` | Default `openid profile email` |
+| `ALMA_AUTH_ENABLED` | `false` turns login off; for local development only |
+| `ALMA_CYLINDER__BORE_DIAMETER_M` etc. | Cylinder geometry for the cable tension (placeholders for now) |
+| `ALMA_IBAHD_QUICK_CONNECT`, `ALMA_SIGNAL_MAP` | Only with `ibahd`; see below |
 
 ## Live data via UDP (iba)
 
-De ibaHD-server levert de data niet in realtime. Daarom stuurt iba (ibaPDA) de metingen live als
-UDP-telegrammen naar dit dashboard:
+The ibaHD server does not deliver data in real time. That is why iba (ibaPDA) sends the measurements
+live as UDP telegrams to this dashboard:
 
 ```
-ibaPDA (Generic UDP-uitvoermodule) --UDP--> ontvanger -> cache (laatste minuten) -> API -> browser
+ibaPDA (Generic UDP output module) --UDP--> receiver -> cache (last minutes) -> API -> browser
 ```
 
-De server bewaart de laatste `ALMA_CACHE_MINUTES` minuten in het geheugen en vult daarmee de
-grafieken; de periodekeuze in het dashboard volgt die cache. Na een herstart begint de cache leeg
-en loopt hij weer vol. Draai de app met **één** uvicorn-worker: een tweede worker zou dezelfde
-UDP-poort willen openen en de pakketten onderling verdelen.
+The server keeps the last `ALMA_CACHE_MINUTES` minutes in memory and fills the charts with them; the
+period selector in the dashboard follows that cache. After a restart the cache starts empty and fills
+up again. Run the app with **one** uvicorn worker: a second worker would try to open the same UDP
+port and the packets would be divided between them.
 
-### Het telegram (`udp_format.json`)
+### The telegram (`udp_format.json`)
 
-ibaPDA stuurt per cyclus (minimaal 50 ms, dus hooguit 20 per seconde) één telegram met alle
-signalen op vaste plaatsen. Het bestand beschrijft die indeling met dezelfde begrippen als de
-ibaPDA-module: offset, datatype (BYTE, WORD, DWORD, SINT, INT, DINT, LINT, FLOAT, DOUBLE) en voor
-een digitaal signaal een bitnummer. De standaardindeling (big endian, 36 bytes):
+Each cycle (at least 50 ms, so at most 20 per second) ibaPDA sends one telegram with all signals at
+fixed positions. The file describes that layout with the same terms as the ibaPDA module: offset,
+data type (BYTE, WORD, DWORD, SINT, INT, DINT, LINT, FLOAT, DOUBLE) and, for a digital signal, a bit
+number. The default layout (big endian, 36 bytes):
 
-| Offset | Type | Bit | Signaal |
+| Offset | Type | Bit | Signal |
 | --- | --- | --- | --- |
 | 0 | FLOAT | | `tower_x` (mm) |
 | 4 | FLOAT | | `tower_y` (mm) |
@@ -116,185 +116,181 @@ een digitaal signaal een bitnummer. De standaardindeling (big endian, 36 bytes):
 | 12 | FLOAT | | `vessel_y` (mm) |
 | 16 | FLOAT | | `pressure_bore_skid1` (bar) |
 | 20 | FLOAT | | `pressure_rod_skid1` (bar) |
-| 24 | DWORD | | `system_mode` (modenummer, 0-255) |
+| 24 | DWORD | | `system_mode` (mode number, 0-255) |
 | 28 | FLOAT | | `pressure_bore_skid2` (bar) |
 | 32 | FLOAT | | `pressure_rod_skid2` (bar) |
 
-Twee skids trekken aan de toren: skid 1 in X, skid 2 in Y. Het dashboard rekent per skid de
-kabelspanning uit (cilinderdruk, nu met dezelfde placeholder-geometrie voor beide) en toont die in
-dezelfde grafiek. De spanning van de twee skids wordt niet opgeteld: ze trekken in verschillende
-richtingen.
+Two skids pull on the tower: skid 1 in X, skid 2 in Y. The dashboard calculates the cable tension per
+skid (cylinder pressure, currently with the same placeholder geometry for both) and shows both in the
+same chart. The tensions of the two skids are not added up: they pull in different directions.
 
-### Systeemmodus
+Per signal, `scale`, `bias`, `min` and `max` can be given (value = raw × scale + bias; a telegram with
+a value outside min/max is rejected). `header_bytes` skips a fixed header (offsets then count from
+the end of it) and `checks` requires constant values in every telegram, for example a fixed key word.
+A telegram with the wrong length, a wrong check value or a value that is not a number (NaN, infinity)
+is rejected and counted.
 
-De PLC stuurt de modus als één getal (`system_mode`). De statusbalk toont de naam ervan. Welk getal
-welke modus is, staat in `ALMA_SYSTEM_MODES`; de standaardnummers zijn placeholders en moeten
-overeenkomen met de PLC. Een nummer dat niet in de tabel staat, toont als `MODE <nummer>`. Welke
-modi als compensatie aan tellen (groene arcering, dempingspercentage in `/api/overview`) staat in
-`ALMA_COMPENSATING_MODES`: standaard CT low en damping.
+### System mode
 
-### Periode en overlay
+The PLC sends the mode as a single number (`system_mode`). The status bar shows its name. Which number
+is which mode is set in `ALMA_SYSTEM_MODES`; the default numbers are placeholders and must match the
+PLC. A number that is not in the table is shown as `MODE <number>`. Which modes count as compensation
+on (green shading, damping percentage in `/api/overview`) is set in `ALMA_COMPENSATING_MODES`: by
+default CT low and damping.
 
-De periodekeuze begint bij 30 seconden (standaard 1 minuut): een torenoscillatie duurt zo'n 6 s,
-dus een minuut toont ongeveer tien oscillaties. De API (`?minutes=`) accepteert 0,25 tot 60 minuten.
-De bovenste grafiek legt de spanning van beide skids (links, kN) over de torenbeweging in X en Y
-(rechts, mm, gestippeld). Zo is te zien of de spanning op tijd en snel genoeg wordt gezet ten
-opzichte van de beweging.
+### Period and overlay
 
-Per signaal kunnen `scale`, `bias`, `min` en `max` worden opgegeven (waarde = ruw × scale + bias;
-een telegram met een waarde buiten min/max wordt geweigerd). `header_bytes` slaat een vaste kop
-over (offsets tellen dan vanaf het einde ervan) en `checks` eist constante waarden in elk telegram,
-bijvoorbeeld een vast sleutelwoord. Een telegram met de verkeerde lengte, een verkeerde controlewaarde
-of een waarde die geen getal is (NaN, oneindig) wordt geweigerd en geteld.
+The period selector starts at 30 seconds (default 1 minute): a tower oscillation lasts about 6 s, so a
+minute shows about ten oscillations. The API (`?minutes=`) accepts 0.25 to 60 minutes. The top chart
+overlays the tension of both skids (left, kN) on the tower motion in X and Y (right, mm, dashed). This
+shows whether the tension is applied on time and fast enough relative to the motion.
 
-### ibaPDA instellen
+### Setting up ibaPDA
 
-Labels verschillen per ibaPDA-versie; zie de handleiding van *ibaPDA-Interface-Generic-UDP*
-(uitvoermodules staan op het tabblad *Outputs*).
+Labels differ per ibaPDA version; see the manual of *ibaPDA-Interface-Generic-UDP* (output modules
+are on the *Outputs* tab).
 
-1. Voeg onder *Outputs* bij de interface *Generic UDP* een uitvoermodule toe.
-2. Doeladres: het IP-adres van de server binnen het VPN (het tunnel-IP), doelpoort: `ALMA_UDP_PORT`
-   (standaard 5005).
-3. Updatetijd: 50 ms of hoger. 100 ms (10 Hz) is ruim genoeg voor een torenoscillatie van ~6 s (0,17 Hz).
-4. Byte-volgorde: gelijk aan `byte_order` in `udp_format.json`. Staat deze verkeerd, dan komen
-   er onzinwaarden binnen en staan digitale signalen op de verkeerde bit.
-5. Zet de signalen op de offsets uit de tabel; `system_mode` als geheel getal (DWORD) op adres 24.
-   De telegramlengte moet `packet_bytes` zijn.
+1. Under *Outputs*, add an output module to the *Generic UDP* interface.
+2. Destination address: the IP address of the server inside the VPN (the tunnel IP), destination
+   port: `ALMA_UDP_PORT` (default 5005).
+3. Update time: 50 ms or higher. 100 ms (10 Hz) is plenty for a tower oscillation of ~6 s (0.17 Hz).
+4. Byte order: the same as `byte_order` in `udp_format.json`. If it is wrong, nonsense values arrive
+   and digital signals end up on the wrong bit.
+5. Put the signals at the offsets from the table; `system_mode` as an integer (DWORD) at address 24.
+   The telegram length must be `packet_bytes`.
 
-ibaPDA schrijft uitgeschakelde signalen als 0 in het telegram: een uitgeschakeld signaal is dus niet
-te onderscheiden van een echte nul.
+ibaPDA writes disabled signals as 0 in the telegram: a disabled signal cannot be told apart from a
+real zero.
 
-### De eerste verbinding met iba controleren
+### Checking the first connection with iba
 
-Er is bewust geen simulator: je test met de echte ibaPDA. Begin met `alma.udp_check`, dan het dashboard.
+There is deliberately no simulator: you test with the real ibaPDA. Start with `alma.udp_check`, then
+the dashboard.
 
-* `python -m alma.udp_check` luistert een paar seconden op de poort en laat zien wie er stuurt,
-  hoe vaak en hoe regelmatig, of de telegrammen bij het formaat passen en welke waarden erin zitten.
-  Met `--dump` toont het de ruwe bytes van het eerste telegram als tabel van float- en
-  integerwaarden per offset, in beide byte-volgordes: daarmee vind je een verkeerde offset of
-  byte-volgorde met het oog. De tool opent de poort zelf, dus stop het dashboard eerst of gebruik
-  `--port`. In Docker: `docker compose stop alma` en daarna
+* `python -m alma.udp_check` listens on the port for a few seconds and shows who is sending, how often
+  and how regularly, whether the telegrams fit the format and which values they contain. With `--dump`
+  it shows the raw bytes of the first telegram as a table of float and integer values per offset, in
+  both byte orders: that lets you spot a wrong offset or byte order by eye. The tool opens the port
+  itself, so stop the dashboard first or use `--port`. In Docker: `docker compose stop alma` and then
   `docker compose run --rm --service-ports alma python -m alma.udp_check`.
-* `GET /api/health` toont (voor ingelogde gebruikers) het aantal ontvangen telegrammen, de leeftijd
-  van het laatste telegram en hoeveel seconden de cache bevat. De details (bronadressen, geweigerde
-  telegrammen) staan in de logs en in `alma.udp_check`.
+* `GET /api/health` shows (for logged-in users) the number of telegrams received, the age of the last
+  telegram and how many seconds the cache holds. The details (source addresses, rejected telegrams)
+  are in the logs and in `alma.udp_check`.
 
-### Het schip: UDP over Starlink, in een VPN met de server
+### The vessel: UDP over Starlink, in a VPN with the server
 
-De ibaPDA staat op het schip en zit via Starlink in een VPN met de server. Het telegram gaat dus
-door de tunnel:
+The ibaPDA is on the vessel and is connected to the server through Starlink in a VPN. The telegram
+therefore goes through the tunnel:
 
 ```
-ibaPDA (schip) --UDP--> VPN-tunnel over Starlink --> server (tunnelinterface, bv. 10.8.0.1:5005) --> ontvanger
+ibaPDA (vessel) --UDP--> VPN tunnel over Starlink --> server (tunnel interface, e.g. 10.8.0.1:5005) --> receiver
 ```
 
-* De tunnel versleutelt en authenticeert. Alleen wie bij het VPN hoort bereikt de poort, en het
-  bronadres binnen de tunnel is niet te vervalsen. Daardoor is `ALMA_UDP_ALLOWED_SOURCES` hier een
-  echte beveiliging en geen formaliteit.
-* Zet in `ALMA_UDP_ALLOWED_SOURCES` het adres dat de server werkelijk ziet. Dat is het tunnel-IP van
-  de ibaPDA-machine, of dat van de router van het schip als die het verkeer vertaalt (NAT) of de
-  tunnel zelf opbouwt. Controleer het met `alma.udp_check`: dat toont het bronadres van binnenkomende
-  telegrammen.
-* **Publiceer de UDP-poort alleen op de tunnelinterface**: `ALMA_UDP_PUBLISH=<tunnel-IP van de server>`
-  in `.env`. De standaard is alleen `127.0.0.1`: zonder deze instelling komt er dus niets binnen, maar
-  er staat ook niets open op internet. Laat in de firewall van de server UDP naar deze poort alleen
-  toe via de tunnelinterface. De tunnelinterface moet bestaan als de container start: Docker
-  weigert een poort te publiceren op een IP-adres dat er nog niet is. Zet de VPN-service dus vóór
-  Docker in de opstartvolgorde.
-* ibaPDA stuurt naar het tunnel-IP van de server, niet naar het publieke adres.
-* Het VPN moet het wisselende publieke adres van het schip aankunnen (Starlink gebruikt CGNAT en
-  wisselt van adres bij een nieuwe verbinding). WireGuard doet dat vanzelf; zet daar
-  `PersistentKeepalive = 25` aan de scheepskant. Bij OpenVPN of IPsec: keepalive en snel herverbinden.
+* The tunnel encrypts and authenticates. Only members of the VPN can reach the port, and the source
+  address inside the tunnel cannot be forged. That makes `ALMA_UDP_ALLOWED_SOURCES` real protection
+  here and not a formality.
+* Put the address the server actually sees in `ALMA_UDP_ALLOWED_SOURCES`. That is the tunnel IP of the
+  ibaPDA machine, or that of the vessel's router if it translates the traffic (NAT) or builds the
+  tunnel itself. Check it with `alma.udp_check`: it shows the source address of incoming telegrams.
+* **Publish the UDP port only on the tunnel interface**: `ALMA_UDP_PUBLISH=<tunnel IP of the server>`
+  in `.env`. The default is `127.0.0.1` only: without this setting nothing arrives, but nothing is
+  open on the internet either. In the server's firewall, only allow UDP to this port via the tunnel
+  interface. The tunnel interface must exist when the container starts: Docker refuses to publish a
+  port on an IP address that does not exist yet. So start the VPN service before Docker.
+* ibaPDA sends to the tunnel IP of the server, not to the public address.
+* The VPN must cope with the vessel's changing public address (Starlink uses CGNAT and changes address
+  on a new connection). WireGuard does this by itself; set `PersistentKeepalive = 25` on the vessel
+  side. With OpenVPN or IPsec: keepalive and fast reconnection.
 
-Starlink beïnvloedt ook de data zelf:
+Starlink also affects the data itself:
 
-* **Pakketten gaan verloren.** Starlink verliest regelmatig pakketten en valt kort uit (obstructie
-  door kraan of toren, overdracht tussen satellieten). Het dashboard toont zo'n gat als gat en
-  schat het verlies uit de aankomsttijden (`loss_percent` in `/api/health`, minimaal 20 telegrammen
-  nodig). Een exacte meting met een teller in het telegram is er nog niet.
-* De tijdstempel is de ontvangsttijd op de server. Dat is hier goed genoeg: Starlink-jitter van
-  tientallen milliseconden is klein tegen een torenperiode van ongeveer 3,5 s, en de klok van het
-  schip doet er niet toe.
+* **Packets get lost.** Starlink regularly loses packets and drops out briefly (obstruction by crane or
+  tower, handover between satellites). The dashboard shows such a gap as a gap and estimates the loss
+  from the arrival times (`loss_percent` in `/api/health`, at least 20 telegrams needed). An exact
+  measurement with a counter in the telegram does not exist yet.
+* The timestamp is the receive time on the server. That is good enough here: Starlink jitter of tens
+  of milliseconds is small compared to a tower period of about 6 s, and the vessel's clock does not
+  matter.
 
-Valt het VPN ooit weg als optie, dan staat de poort open op internet. Het bronfilter is dan niet
-bruikbaar (wisselend adres), dus de app weigert `ALMA_UDP_ALLOW_ANY_SOURCE=true` op een niet-lokaal
-adres, tenzij `udp_format.json` een `checks`-sleutelwoord bevat. Dat sleutelwoord houdt toevallig en
-blind verkeer tegen, maar gaat onversleuteld over de lijn. Beter is dan een kleine doorstuurder aan
-boord die het telegram met authenticatie (HTTPS) naar de server stuurt en na een uitval de gemiste
-metingen nastuurt.
+If the VPN ever drops out as an option, the port is open on the internet. The source filter is then
+unusable (changing address), so the app refuses `ALMA_UDP_ALLOW_ANY_SOURCE=true` on a non-local
+address unless `udp_format.json` contains a `checks` key word. That key word keeps out accidental and
+blind traffic, but travels unencrypted over the line. A better option then is a small forwarder on
+board that sends the telegram to the server with authentication (HTTPS) and re-sends the missed
+measurements after an outage.
 
-### Overige beveiliging van de UDP-poort
+### Other security of the UDP port
 
-* `ALMA_UDP_ALLOWED_SOURCES` is verplicht; de app start niet zonder. Het filter vertrouwt het
-  bronadres, en dat is alleen veilig binnen de tunnel of een eigen netwerk.
-* **Docker Desktop (Windows/macOS) toont elke afzender als `172.17.0.1`** (gemeten, ook voor pakketten
-  van de host zelf): daar kan het filter afzenders niet onderscheiden. Op een Linux-host blijft het
-  bronadres van pakketten die via de tunnelinterface binnenkomen normaal behouden; controleer dat met
-  `alma.udp_check` in de container. Draai productie dus op een Linux-host.
-* Het geheugen is begrensd (`ALMA_UDP_MAX_SAMPLES`): een stortvloed aan pakketten verdringt hooguit
-  oudere metingen. Geweigerde pakketten worden geteld en hooguit eens per minuut gelogd, zonder inhoud.
-* `/api/health` toont aan ingelogde gebruikers alleen tellers, nooit adressen.
+* `ALMA_UDP_ALLOWED_SOURCES` is required; the app does not start without it. The filter trusts the
+  source address, which is only safe inside the tunnel or on a private network.
+* **Docker Desktop (Windows/macOS) shows every sender as `172.17.0.1`** (measured, also for packets
+  from the host itself): the filter cannot tell senders apart there. On a Linux host the source address
+  of packets arriving through the tunnel interface is normally preserved; check this with
+  `alma.udp_check` in the container. So run production on a Linux host.
+* Memory is bounded (`ALMA_UDP_MAX_SAMPLES`): a flood of packets displaces older measurements at most.
+  Rejected packets are counted and logged at most once a minute, without content.
+* `/api/health` shows logged-in users only counters, never addresses.
 
-### Splitsen in frontend en backend
+### Splitting into frontend and backend
 
-Met het VPN is de UDP-poort niet publiek, en dan is één proces het eenvoudigst: ontvanger, cache,
-API en pagina draaien samen in één container, met één uvicorn-worker. Klanten bereiken alleen de
-webpagina, via een reverse proxy met TLS en de Authentik-login; het VPN voert alleen de metingen.
+With the VPN the UDP port is not public, and then a single process is simplest: receiver, cache, API
+and page run together in one container, with one uvicorn worker. Customers only reach the web page,
+through a reverse proxy with TLS and the Authentik login; the VPN carries only the measurements.
 
-De klantpagina is gewoon een webpagina: statische bestanden (`frontend/`) die alleen via `/api/...`
-met de backend (`alma/`) praten. Dat is al gescheiden. Een aparte *deployment* van de pagina levert
-alleen iets op als je hem elders wilt hosten (dan komen CORS en sessiecookies erbij).
+The customer page is just a web page: static files (`frontend/`) that only talk to the backend
+(`alma/`) through `/api/...`. That is already separated. A separate *deployment* of the page only
+pays off if you want to host it elsewhere (then CORS and session cookies come into play).
 
-De ontvanger en cache (`alma/ingest/`) hangen niet van FastAPI af. Dat maakt het later mogelijk de
-ontvanger los te draaien, bijvoorbeeld om de pagina te kunnen herstarten zonder de cache te verliezen,
-of om dezelfde decodeerlaag in een doorstuurder aan boord te gebruiken.
+The receiver and cache (`alma/ingest/`) do not depend on FastAPI. That makes it possible later to run
+the receiver separately, for example to be able to restart the page without losing the cache, or to
+use the same decoding layer in a forwarder on board.
 
-## ibaHD-server als bron (historie, niet realtime)
+## ibaHD server as a source (history, not real time)
 
-Vereist de licentie **ibaHD-Server-API-Read** op de ibaHD-server.
+Requires the **ibaHD-Server-API-Read** licence on the ibaHD server.
 
-1. Exporteer in ibaHD Manager de quick-connect-gegevens naar `secrets/quick_connect.json`
-   (Host, Port, ApiKey, TlsServerCertificate). De map `secrets/` staat in `.gitignore` en
-   `.dockerignore`. Het certificaat is alleen geldig voor de namen die erin staan: gebruik die
-   als `Host`.
-2. **Controleer de verbinding:** `.venv\Scripts\python -m alma.ibahd_check` (in Docker:
-   `docker compose run --rm alma python -m alma.ibahd_check`). Het loopt stap voor stap langs
-   het bestand, het netwerk, TLS en ApiKey, de stores en kanalen, de signaalmap, de laatste
-   waarden en een meetreeks, en zegt bij een fout wat er waarschijnlijk mis is. De ApiKey komt
-   nooit in de uitvoer.
-3. Zoek de kanalen op met `--list` of `--grep <tekst>` en vul in `signals.json` de ID's van de
-   zeven signalen in (de waarde uit de eerste kolom, vorm `<store>\<kanaal>`). Draai de check
-   opnieuw: die toetst elk ID tegen het schema en leest de data uit.
-4. Zet `ALMA_SOURCE=ibahd` en herstart. Is de server onbereikbaar, dan geeft de API een 503 en
-   toont het dashboard NO DATA; de reden staat (hooguit eens per minuut) in de logs.
+1. In ibaHD Manager, export the quick-connect details to `secrets/quick_connect.json`
+   (Host, Port, ApiKey, TlsServerCertificate). The `secrets/` folder is in `.gitignore` and
+   `.dockerignore`. The certificate is only valid for the names it contains: use one of those as
+   `Host`.
+2. **Check the connection:** `.venv\Scripts\python -m alma.ibahd_check` (in Docker:
+   `docker compose run --rm alma python -m alma.ibahd_check`). It goes step by step through the file,
+   the network, TLS and ApiKey, the stores and channels, the signal map, the latest values and a
+   measurement series, and says what is probably wrong in case of an error. The ApiKey never appears
+   in the output.
+3. Look up the channels with `--list` or `--grep <text>` and fill in the IDs of the nine signals in
+   `signals.json` (the value from the first column, of the form `<store>\<channel>`). Run the check
+   again: it tests each ID against the schema and reads the data.
+4. Set `ALMA_SOURCE=ibahd` and restart. If the server is unreachable, the API returns a 503 and the
+   dashboard shows NO DATA; the reason is in the logs (at most once a minute).
 
-Tijden in de ibaHD-API zijn microseconden sinds 1970. De tests (`tests/test_ibahd.py`) draaien
-tegen een nagebootste server (`tests/fake_ibahd.py`: echte gRPC, TLS en API-key) en bewijzen dat
-onze client consistent is met onze lezing van de iba-documentatie. Of een echte server zich zo
-gedraagt, toont alleen `alma.ibahd_check`. Het dashboard leest *aggregated* data (gemiddelde per
-bucket, maximaal 40.000 punten per venster); de check meldt de effectieve meetfrequentie en
-waarschuwt onder 2 Hz, waar ruwe data (`GetRawChannelData`) beter zou zijn voor de frequentieanalyse.
+Times in the ibaHD API are microseconds since 1970. The tests (`tests/test_ibahd.py`) run against a
+simulated server (`tests/fake_ibahd.py`: real gRPC, TLS and API key) and prove that our client is
+consistent with our reading of the iba documentation. Whether a real server behaves that way is only
+shown by `alma.ibahd_check`. The dashboard reads *aggregated* data (average per bucket, at most 40,000
+points per window); the check reports the effective sampling rate and warns below 2 Hz, where raw
+data (`GetRawChannelData`) would be better for the frequency analysis.
 
-## Beveiliging: hoe het werkt
+## Security: how it works
 
-* **Alles dicht, behalve `/healthz` en `/auth/*`.** Nieuwe routes zijn dus automatisch beschermd.
-* **Authorization code flow met PKCE**, `state` en `nonce`. De id_token wordt gecontroleerd op
-  handtekening (RS256 via JWKS), issuer, audience en geldigheid. Mislukt dat, dan wordt er niet
-  ingelogd.
-* **Sessiecookie**: ondertekend (niet versleuteld), `HttpOnly`, `Secure`, `SameSite=Lax` en op
-  https met het `__Host-`-voorvoegsel. Hij bevat alleen naam, e-mail, gebruikersnaam en `sub`;
-  er worden geen tokens bewaard. Een sessie is absoluut beperkt in tijd.
-* **Uitloggen** beëindigt de sessie in de app, niet de Authentik-sessie (geen single logout).
-  Op een gedeelde computer ook in Authentik uitloggen.
-* Strikte `Content-Security-Policy` (alle scripts en stijlen komen van de app zelf; uPlot staat in
-  `frontend/vendor/`), `Cache-Control: no-store`, HSTS bij https.
+* **Everything closed, except `/healthz` and `/auth/*`.** New routes are therefore protected
+  automatically.
+* **Authorization code flow with PKCE**, `state` and `nonce`. The id_token is checked for signature
+  (RS256 via JWKS), issuer, audience and validity. If that fails, nobody is logged in.
+* **Session cookie**: signed (not encrypted), `HttpOnly`, `Secure`, `SameSite=Lax` and, on https,
+  with the `__Host-` prefix. It contains only name, email, username and `sub`; no tokens are stored. A
+  session is limited in absolute time.
+* **Logging out** ends the session in the app, not the Authentik session (no single logout). On a
+  shared computer also log out in Authentik.
+* Strict `Content-Security-Policy` (all scripts and styles come from the app itself; uPlot is in
+  `frontend/vendor/`), `Cache-Control: no-store`, HSTS on https.
 
-## Onderhoud
+## Maintenance
 
-* Afhankelijkheden vernieuwen (vastgepind met hashes in `requirements.txt`):
+* Refreshing dependencies (pinned with hashes in `requirements.txt`):
   `uv pip compile pyproject.toml --extra ibahd --universal --python-version 3.13 --generate-hashes -o requirements.txt`
-  en daarna `docker compose up -d --build`.
-* **Licentie:** het pakket `ibahd-api` is deels proprietary en mag alleen met een geldige iba-licentie
-  worden gebruikt. Publiceer het Docker-image dus niet in een openbaar register.
-* Bekende beperking: twee inlogpogingen tegelijk in dezelfde browser (twee tabbladen) laten er één
-  mislukken; opnieuw inloggen lost dat op.
+  and then `docker compose up -d --build`.
+* **Licence:** the `ibahd-api` package is partly proprietary and may only be used with a valid iba
+  licence. So do not publish the Docker image in a public registry.
+* Known limitation: two login attempts at the same time in the same browser (two tabs) make one of
+  them fail; logging in again fixes that.

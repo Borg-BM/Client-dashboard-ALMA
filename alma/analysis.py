@@ -7,39 +7,39 @@ from alma.config import DEFAULT_COMPENSATING_MODES, SKIDS, CylinderGeometry
 
 BAR_M2_TO_KN = 100.0  # 1 bar * 1 m2 = 1e5 N = 100 kN
 MOTION_COLUMNS = ["tower_x", "tower_y", "vessel_x", "vessel_y"]
-# Kolommen die een toestand of modus zijn: bij inkrimpen telt het maximum, zodat een korte periode blijft staan
-# en er geen gemiddelde van modenummers ontstaat.
+# Columns that are a state or mode: when downsampling the maximum is used, so a short period is preserved
+# and no average of mode numbers is produced.
 FLAG_COLUMNS = ("compensation_active", "system_mode")
 
 
 def cylinder_force_kn(p_bore: pd.Series, p_rod: pd.Series, geo: CylinderGeometry) -> pd.Series:
-    """Netto cilinderkracht (kN) uit de druk aan bodem- en stangzijde (bar)."""
+    """Net cylinder force (kN) from the pressure on the bore and rod side (bar)."""
     a_bore = np.pi * geo.bore_diameter_m**2 / 4
     a_annulus = a_bore - np.pi * geo.rod_diameter_m**2 / 4
     return (p_bore * a_bore - p_rod * a_annulus) * BAR_M2_TO_KN
 
 
 def cable_tension_kn(p_bore: pd.Series, p_rod: pd.Series, geo: CylinderGeometry) -> pd.Series:
-    """Geschatte kabelspanning (kN) per kabeldeel: cilinderkracht gedeeld door takelverhouding.
+    """Estimated cable tension (kN) per fall: cylinder force divided by the reeving ratio.
 
-    Aanname: statische benadering, geen wrijving/versnelling van de takel behalve het rendement.
+    Assumption: static approximation, no friction/acceleration of the reeving other than the efficiency.
     """
     return cylinder_force_kn(p_bore, p_rod, geo) / (geo.reeving_falls * geo.efficiency)
 
 
 def epoch_seconds(index: pd.DatetimeIndex) -> np.ndarray:
-    """Seconden sinds 1970 als float, ongeacht de tijdresolutie van de index (ns/us/ms)."""
+    """Seconds since 1970 as a float, regardless of the time resolution of the index (ns/us/ms)."""
     return ((index - pd.Timestamp("1970-01-01", tz="UTC")) / pd.Timedelta(seconds=1)).to_numpy(dtype=float)
 
 
 def rms(deviation: pd.Series) -> float:
-    """Effectieve waarde van een afwijking (al ten opzichte van het gemiddelde, dus niet nog eens centreren:
-    bij de grootte van een afwijking meet centreren de spreiding daarvan en rapporteert het te weinig demping)."""
+    """RMS value of a deviation (already relative to the mean, so do not center it again:
+    for the magnitude of a deviation, centering measures its spread and would report too little damping)."""
     return float(np.sqrt(np.mean(np.square(deviation)))) if len(deviation) else float("nan")
 
 
 def dominant_frequency_hz(values: pd.Series, f_min: float = 0.05, f_max: float = 2.0) -> float | None:
-    """Dominante trillingsfrequentie via FFT; None als er te weinig data is."""
+    """Dominant vibration frequency via FFT; None if there is too little data."""
     if len(values) < 64:
         return None
     dt = float(np.median(np.diff(epoch_seconds(values.index))))
@@ -56,7 +56,7 @@ def dominant_frequency_hz(values: pd.Series, f_min: float = 0.05, f_max: float =
 
 
 def motion_baseline(df: pd.DataFrame) -> dict[str, float]:
-    """Gemiddelde positie van toren en schip over df: het nulpunt van de afwijking."""
+    """Mean position of tower and vessel over df: the zero point of the deviation."""
     return {c: float(df[c].mean()) for c in MOTION_COLUMNS}
 
 
@@ -66,9 +66,9 @@ def add_derived(
     baseline: dict[str, float] | None = None,
     compensating: Collection[int] = DEFAULT_COMPENSATING_MODES,
 ) -> pd.DataFrame:
-    """Voeg kabelspanning per skid, de compensatievlag en afwijkingen toe. De afwijking is positie minus het
-    gemiddelde (standaard het gemiddelde over df zelf; geef baseline mee om een ander nulpunt te gebruiken).
-    compensation_active is 1 in de modi van `compensating` (modenummers uit system_mode)."""
+    """Add cable tension per skid, the compensation flag and deviations. The deviation is position minus the
+    mean (by default the mean over df itself; pass baseline to use a different zero point).
+    compensation_active is 1 in the modes of `compensating` (mode numbers from system_mode)."""
     out = df.copy()
     base = baseline or motion_baseline(df)
     for column in MOTION_COLUMNS:
@@ -83,11 +83,11 @@ def add_derived(
 
 
 def decimate(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
-    """Beperk df tot ongeveer max_points rijen voor de grafiek, zonder de trilling weg te middelen.
+    """Reduce df to about max_points rows for the chart, without averaging out the vibration.
 
-    Elke bucket geeft twee punten (minimum en maximum), zodat een snel oscillerend signaal over
-    een lange periode als een band zichtbaar blijft en niet door grof samplen verdwijnt (aliasing).
-    De vlag- en modekolommen (FLAG_COLUMNS) nemen per bucket het maximum, dus een korte aan-periode gaat niet verloren.
+    Each bucket yields two points (minimum and maximum), so a rapidly oscillating signal over
+    a long period stays visible as a band and does not vanish through coarse sampling (aliasing).
+    The flag and mode columns (FLAG_COLUMNS) take the maximum per bucket, so a short on-period is not lost.
     """
     if len(df) <= max_points:
         return df
@@ -111,7 +111,7 @@ def decimate(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
 
 
 def overview(df: pd.DataFrame) -> dict:
-    """Kerncijfers over het gekozen venster; df moet add_derived al doorlopen hebben."""
+    """Key figures for the chosen window; df must already have been through add_derived."""
     active = df["compensation_active"] > 0.5
     on, off = df[active], df[~active]
 
@@ -136,5 +136,5 @@ def overview(df: pd.DataFrame) -> dict:
         "tower_rms_compensation_off_mm": rms_off,
         "tower_rms_compensation_on_mm": rms_on,
         "reduction_percent": reduction,
-        "skids": skids,  # spanning per skid, alleen over de periode met compensatie aan
+        "skids": skids,  # tension per skid, only over the period with compensation on
     }

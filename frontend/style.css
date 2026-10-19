@@ -1,10 +1,10 @@
-/* Tokens: kleuren van de dataviz-richtlijn (gevalideerd) + het Barge Master-merk (navy/cyaan). */
+/* Tokens: colours of the dataviz guideline (validated) + the Barge Master brand (navy/cyan). */
 :root {
   color-scheme: light;
   --page: #f9f9f7; --surface: #fcfcfb; --text: #0b0b0b; --text-2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, 0.10);
-  --series-1: #2a78d6; --series-2: #eb6834;       /* X en Y */
-  --shade: rgba(12, 163, 12, 0.14);               /* compensation aan */
+  --series-1: #2a78d6; --series-2: #eb6834;       /* X and Y */
+  --shade: rgba(12, 163, 12, 0.14);               /* compensation on */
   --dot: #051541;                                  /* BM navy */
   --on: #0ca30c; --off: #d03b3b; --nodata: #6b6a66; --warn: #ec835a; --warn-text: #b3441a;
   --warn-bg: #fff4e5;
@@ -16,7 +16,7 @@
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
     --series-1: #3987e5; --series-2: #d95926;
     --shade: rgba(12, 163, 12, 0.20);
-    --dot: #28ace2;                                /* BM cyaan */
+    --dot: #28ace2;                                /* BM cyan */
     --warn-text: #fb923c; --warn-bg: #2b1d10;
   }
 }
@@ -29,7 +29,7 @@ body {
 }
 @media (min-width: 700px) { body { padding: 20px; } }
 
-/* Kopbalk: altijd licht, zodat het (donkere) logo ook in dark mode leesbaar blijft */
+/* Top bar: always light, so the (dark) logo stays readable in dark mode too */
 .topbar {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
   background: #fff; color: #0b0b0b; border: 1px solid var(--border); border-radius: 10px;
@@ -48,7 +48,7 @@ button:hover, select:hover { border-color: #051541; }
 .user { display: flex; align-items: center; gap: 8px; margin: 0; }
 #user-name { font-weight: 600; }
 
-/* Compensatiebalk: kleur + icoon + tekst, dus nooit alleen kleur */
+/* Status bar: colour + icon + text, so never colour alone */
 .status {
   display: flex; align-items: center; justify-content: center; gap: 12px;
   color: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;
@@ -68,7 +68,7 @@ button:hover, select:hover { border-color: #051541; }
 .key { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; margin: 0 2px 8px; }
 .swatch { width: 18px; height: 12px; border-radius: 2px; background: var(--shade); border: 1px solid var(--on); }
 
-/* Kwarten op een computerscherm, onder elkaar op een telefoon */
+/* Two columns on a computer screen, stacked on a phone */
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 @media (min-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .card {
@@ -83,7 +83,7 @@ button:hover, select:hover { border-color: #051541; }
 .chart .u-legend .u-marker { border-radius: 2px; }
 .nodata { color: var(--muted); padding: 24px 0; text-align: center; }
 
-/* Joystick-cirkels */
+/* Joystick circles */
 .sticks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; justify-items: center; }
 .stick { margin: 0; text-align: center; width: 100%; max-width: 240px; }
 .stick svg { width: 100%; height: auto; aspect-ratio: 1; display: block; }

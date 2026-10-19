@@ -1,4 +1,4 @@
-"""Instellingen van de UDP-bron: veilig by default, en onveilig alleen bewust."""
+"""Settings of the UDP source: safe by default, and unsafe only deliberately."""
 
 import pytest
 from pydantic import ValidationError
@@ -22,7 +22,7 @@ def test_udp_source_with_an_allowlist_or_the_explicit_opt_out():
 
 
 def test_allowlist_and_allow_any_exclude_each_other():
-    with pytest.raises(ValidationError, match="niet allebei"):
+    with pytest.raises(ValidationError, match="not both"):
         make(source="udp", udp_allowed_sources=["10.0.0.5"], udp_allow_any_source=True)
 
 
@@ -37,7 +37,7 @@ def test_allowlist_comes_from_a_comma_separated_variable(monkeypatch):
 
 @pytest.mark.parametrize("entry", ["not-an-ip", "10.0.0.256", "10.0.0.0/33", "10.0.0.5:5005"])
 def test_allowlist_rejects_nonsense_even_when_the_source_is_not_udp(entry):
-    with pytest.raises(ValidationError, match="geen IP-adres of netwerk"):
+    with pytest.raises(ValidationError, match="not an IP address or network"):
         make(source="mock", udp_allowed_sources=[entry])
 
 

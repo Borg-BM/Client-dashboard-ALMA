@@ -23,7 +23,7 @@ def test_cylinder_force_and_tension():
     geo = CylinderGeometry(bore_diameter_m=0.2, rod_diameter_m=0.0, reeving_falls=2, efficiency=1.0)
 
     force = analysis.cylinder_force_kn(pd.Series([100.0]), pd.Series([0.0]), geo)
-    # 100 bar op 0,0314 m2 = 314 kN
+    # 100 bar on 0.0314 m2 = 314 kN
     assert force.iloc[0] == pytest.approx(314.16, rel=1e-3)
     tension = analysis.cable_tension_kn(pd.Series([100.0]), pd.Series([0.0]), geo)
     assert tension.iloc[0] == pytest.approx(157.08, rel=1e-3)
@@ -31,9 +31,9 @@ def test_cylinder_force_and_tension():
 
 def test_deviation_is_relative_to_the_mean():
     raw = mock_window(CYCLE_S / 2)
-    assert abs(raw["tower_x"].mean()) > 1  # de ruwe MRU-waarde heeft een offset...
+    assert abs(raw["tower_x"].mean()) > 1  # the raw MRU value has an offset...
     derived = analysis.add_derived(raw, GEO)
-    for column in analysis.MOTION_COLUMNS:  # ...die na aftrekken van het gemiddelde weg is
+    for column in analysis.MOTION_COLUMNS:  # ...which is gone after subtracting the mean
         assert derived[column].mean() == pytest.approx(0, abs=1e-9)
 
 
@@ -45,7 +45,7 @@ def test_deviation_can_use_a_given_baseline():
 
 
 def test_dominant_frequency_and_damping_from_mock():
-    # Een volle cyclus: uit- en aan-deel bevatten dan beide een hele 'wind'-periode, dus een eerlijke vergelijking
+    # A full cycle: the off and on parts then both contain a whole 'wind' period, so it is a fair comparison
     df = analysis.add_derived(mock_window(CYCLE_S), GEO)
     result = analysis.overview(df)
     assert result["dominant_frequency_hz"] == pytest.approx(TOWER_FREQ_HZ, abs=0.02)
@@ -65,10 +65,10 @@ def test_decimate_keeps_peaks_and_short_active_periods():
     index = pd.date_range("2026-01-01", periods=n, freq="100ms", tz="UTC")
     columns = ["compensation_active", "system_mode", *analysis.MOTION_COLUMNS, "tension_skid1_kn"]
     df = pd.DataFrame({c: np.zeros(n) for c in columns}, index=index)
-    df.loc[index[12_345], "tower_x"] = 99.0  # een enkele piek
-    df.loc[index[7_777], "tower_y"] = -88.0  # en een dal
-    df.loc[index[3_000:3_002], "compensation_active"] = 1.0  # en een heel korte aan-periode
-    df.loc[index[3_000:3_002], "system_mode"] = 4.0  # met de bijbehorende modus
+    df.loc[index[12_345], "tower_x"] = 99.0  # a single peak
+    df.loc[index[7_777], "tower_y"] = -88.0  # and a trough
+    df.loc[index[3_000:3_002], "compensation_active"] = 1.0  # and a very short on-period
+    df.loc[index[3_000:3_002], "system_mode"] = 4.0  # with the matching mode
 
     out = analysis.decimate(df, 2_000)
     assert len(out) <= 2_000 + 2
@@ -102,7 +102,7 @@ def test_api_endpoints_without_login(client):
     assert client.get("/").status_code == 200
     assert client.get("/vendor/uplot/uPlot.iife.min.js").status_code == 200
     assert client.get("/assets/bm-logo.png").headers["content-type"] == "image/png"
-    assert client.get("/docs").status_code == 404  # Swagger UI uit: past niet bij de CSP
+    assert client.get("/docs").status_code == 404  # Swagger UI is off: does not fit the CSP
 
 
 def test_timeseries_has_everything_the_charts_need(client):
@@ -126,7 +126,7 @@ def test_live_gives_status_and_dots(client):
         m = live[who]
         assert m["fullscale"] == fullscale
         assert len(m["trail"]) > 10 and all(len(p) == 2 for p in m["trail"])
-        assert [m["x"], m["y"]] == m["trail"][-1]  # de stip staat op het laatste punt van de staart
+        assert [m["x"], m["y"]] == m["trail"][-1]  # the dot sits at the last point of the trail
     assert client.get("/api/live?minutes=0").status_code == 422
 
 
@@ -140,13 +140,13 @@ def test_live_status_follows_the_data(monkeypatch):
         def read(self, start, end, max_points):
             return self.df
 
-    # Laatste meting is 5 minuten oud: de balk moet 'NO DATA' kunnen tonen i.p.v. een oude status
+    # Last measurement is 5 minutes old: the bar must be able to show 'NO DATA' instead of an old status
     old = mock_window(30, ends_at=datetime.now(timezone.utc).timestamp() - 300)
     monkeypatch.setattr(main_module, "create_source", lambda settings: Stub(old))
     stale = TestClient(create_app(Settings(_env_file=None, auth_enabled=False))).get("/api/live").json()
     assert stale["ready"] is True and stale["stale"] is True and stale["age_s"] > 200
 
-    # Lege bron: geen crash, gewoon 'niet klaar' en lege grafieken
+    # Empty source: no crash, just 'not ready' and empty charts
     now = datetime.now(timezone.utc)
     empty = MockSource().read(now, now - timedelta(seconds=1), 10)
     assert empty.empty
@@ -164,18 +164,18 @@ def test_cylinder_geometry_from_environment(monkeypatch):
     settings = Settings(_env_file=None, auth_enabled=False)
     assert settings.cylinder.bore_diameter_m == 0.25
     assert settings.cylinder.reeving_falls == 6
-    assert settings.cylinder.rod_diameter_m == 0.140  # niet opgegeven: default blijft
+    assert settings.cylinder.rod_diameter_m == 0.140  # not specified: default is kept
 
 
-# ---- twee skids -----------------------------------------------------------------------------------------
+# ---- two skids -----------------------------------------------------------------------------------------
 
 
 def test_every_skid_gets_its_own_tension():
     df = analysis.add_derived(mock_window(60), GEO)
     for n in SKIDS:
         assert f"tension_skid{n}_kn" in df and f"force_skid{n}_kn" in df
-    assert "tension_kn" not in df  # er is geen samengevoegde spanning: de skids trekken in verschillende richtingen
-    # skid 2 volgt zijn eigen druk en niet die van skid 1
+    assert "tension_kn" not in df  # there is no combined tension: the skids pull in different directions
+    # skid 2 follows its own pressure and not that of skid 1
     pressures = pd.DataFrame(
         {"system_mode": [4.0], "tower_x": [0.0], "tower_y": [0.0], "vessel_x": [0.0], "vessel_y": [0.0],
          "pressure_bore_skid1": [100.0], "pressure_rod_skid1": [0.0],
@@ -193,15 +193,15 @@ def test_overview_reports_tension_per_skid():
         assert stats["tension_peak_kn"] > stats["tension_mean_kn"] > 0 and stats["tension_amplitude_kn"] > 0
 
 
-# ---- systeemmodi ----------------------------------------------------------------------------------------
+# ---- system modes ----------------------------------------------------------------------------------------
 
 
 def test_compensation_follows_the_system_mode():
     raw = mock_window(CYCLE_S)
     default = analysis.add_derived(raw, GEO)
-    assert set(raw["system_mode"].astype(int)) == set(DEFAULT_SYSTEM_MODES)  # de mock doorloopt alle modi
+    assert set(raw["system_mode"].astype(int)) == set(DEFAULT_SYSTEM_MODES)  # the mock steps through all modes
     by_mode = default.groupby(raw["system_mode"].astype(int))["compensation_active"].max()
-    assert by_mode.to_dict() == {0: 0.0, 1: 0.0, 2: 0.0, 3: 1.0, 4: 1.0}  # CT low en damping tellen als aan
+    assert by_mode.to_dict() == {0: 0.0, 1: 0.0, 2: 0.0, 3: 1.0, 4: 1.0}  # CT low and damping count as on
     only_damping = analysis.add_derived(raw, GEO, compensating=[4])
     assert only_damping.groupby(raw["system_mode"].astype(int))["compensation_active"].max().to_dict()[3] == 0.0
 
@@ -209,17 +209,17 @@ def test_compensation_follows_the_system_mode():
 def test_the_mock_skids_only_pull_when_the_system_does():
     df = analysis.add_derived(mock_window(CYCLE_S), GEO)
     amplitude = df.groupby(df["system_mode"].astype(int))["tension_skid1_kn"].agg(lambda s: s.max() - s.min())
-    assert amplitude[4] > amplitude[3] > amplitude[2]  # damping trekt harder dan CT low, daarvoor is het stil
-    assert amplitude[0] < 1  # zonder HPU staat er niets op
+    assert amplitude[4] > amplitude[3] > amplitude[2]  # damping pulls harder than CT low, before that it is quiet
+    assert amplitude[0] < 1  # without the HPU there is no load
 
 
 def test_system_modes_and_compensating_modes_can_be_set_from_the_environment(monkeypatch):
-    monkeypatch.setenv("ALMA_SYSTEM_MODES", '{"10": "Uit", "20": "Dempen"}')
+    monkeypatch.setenv("ALMA_SYSTEM_MODES", '{"10": "Off", "20": "Damping"}')
     monkeypatch.setenv("ALMA_COMPENSATING_MODES", "20")
     settings = Settings(_env_file=None, auth_enabled=False)
-    assert settings.system_modes == {10: "Uit", 20: "Dempen"} and settings.compensating_modes == [20]
+    assert settings.system_modes == {10: "Off", 20: "Damping"} and settings.compensating_modes == [20]
     live = TestClient(create_app(settings)).get("/api/live?minutes=1").json()
-    # de mock stuurt codes 0-4, die niet in deze tabel staan: ze krijgen een neutrale naam
+    # the mock sends codes 0-4, which are not in this table: they get a neutral name
     assert live["mode"]["name"] == f"Mode {live['mode']['code']}"
 
 
@@ -240,7 +240,7 @@ def test_the_telegram_format_matches_the_signals():
     )  # fmt: skip
 
 
-# ---- korte vensters -------------------------------------------------------------------------------------
+# ---- short windows -------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("minutes", ["0.25", "0.5", "1", "1.5"])

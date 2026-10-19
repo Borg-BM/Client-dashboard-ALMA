@@ -3,27 +3,27 @@ services:
     build: .
     image: alma-dashboard:local
     restart: unless-stopped
-    # Alle instellingen staan in .env (kopieer .env.example); die file staat bewust niet in git.
-    # Optioneel (Compose 2.24+): in Portainer ontbreekt .env en schrijft Portainer de stackvariabelen
-    # naar stack.env naast deze file; dat bestand geeft ze door aan de container.
+    # All settings are in .env (copy .env.example); that file is deliberately not in git.
+    # Optional (Compose 2.24+): in Portainer .env is missing and Portainer writes the stack variables
+    # to stack.env next to this file; that file passes them on to the container.
     env_file:
       - path: .env
         required: false
       - path: stack.env
         required: false
     ports:
-      # Alleen op de host zelf bereikbaar. Zet hier een reverse proxy met TLS voor
-      # (zie README); publiceer deze poort nooit rechtstreeks op internet.
+      # Reachable on the host itself only. Put a reverse proxy with TLS in front of this
+      # (see README); never publish this port directly on the internet.
       - "127.0.0.1:8000:8000"
-      # UDP-telegrammen van iba (alleen nodig bij ALMA_SOURCE=udp). Standaard alleen op localhost: de ibaPDA
-      # zit in een VPN met de server, dus zet ALMA_UDP_PUBLISH op het IP van de server in die tunnel. Publiceer
-      # deze poort nooit op een publiek adres. Zelfde poortnummer binnen en buiten de container.
+      # UDP telegrams from iba (only needed with ALMA_SOURCE=udp). Localhost only by default: the ibaPDA
+      # is in a VPN with the server, so set ALMA_UDP_PUBLISH to the server's IP in that tunnel. Never publish
+      # this port on a public address. Same port number inside and outside the container.
       - "${ALMA_UDP_PUBLISH:-127.0.0.1}:${ALMA_UDP_PORT:-5005}:${ALMA_UDP_PORT:-5005}/udp"
-    # De bind-mounts van secrets/, signals.json en udp_format.json staan in docker-compose.override.yml
-    # (docker compose leest die automatisch). Portainer gebruikt alleen dit bestand: relatieve paden
-    # bestaan daar niet op de host en zouden als lege mappen worden aangemaakt. De image bevat dezelfde
-    # standaardbestanden.
-    # De app schrijft niets naar schijf: het bestandssysteem kan dus read-only.
+    # The bind mounts of secrets/, signals.json and udp_format.json are in docker-compose.override.yml
+    # (docker compose reads it automatically). Portainer only uses this file: relative paths
+    # do not exist on the host there and would be created as empty directories. The image contains the
+    # same default files.
+    # The app writes nothing to disk, so the filesystem can be read-only.
     read_only: true
     tmpfs:
       - /tmp

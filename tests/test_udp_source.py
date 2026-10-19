@@ -1,8 +1,8 @@
-"""De UDP-bron als geheel: echte UDP-pakketten over loopback -> ontvanger -> cache -> API.
+"""The UDP source as a whole: real UDP packets over loopback -> receiver -> cache -> API.
 
-De klok van de bron wordt door de test bediend: elk pakket krijgt een tijdstip dat de test kiest, en de
-test wacht tot het pakket is verwerkt voordat het volgende de deur uit gaat. Zo is de tijdlijn in de cache
-exact bekend zonder dat de test in real time hoeft te draaien.
+The source's clock is driven by the test: each packet gets a timestamp the test chooses, and the test
+waits until the packet has been processed before the next one goes out. This way the timeline in the cache
+is known exactly without the test having to run in real time.
 """
 
 import json
@@ -14,14 +14,14 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-# TIJDELIJK (verwijderen zodra ontvanger, simulator en heartbeat gebouwd zijn): tijdens het bouwen in golven
-# bestaan die onderdelen nog niet, en dan zou deze test de hele suite als verzamelfout laten mislukken.
+# TEMPORARY (remove once receiver, simulator and heartbeat are built): while building in waves those
+# components do not exist yet, and this test would then fail the whole suite with a collection error.
 try:
     import alma.ingest.receiver  # noqa: F401
     import alma.sources.udp  # noqa: F401
     from alma.sources.mock import signals_at  # noqa: F401
 except ImportError as missing:
-    pytest.skip(f"onderdeel nog niet gebouwd: {missing}", allow_module_level=True)
+    pytest.skip(f"component not built yet: {missing}", allow_module_level=True)
 
 from alma import main as main_module
 from alma.config import ROOT, SIGNALS, Settings
@@ -32,11 +32,11 @@ from alma.sources.udp import UdpSource
 
 DEFAULT = json.loads((ROOT / "udp_format.json").read_text(encoding="utf-8"))
 FORMAT = PacketFormat.load(ROOT / "udp_format.json", required_signals=SIGNALS)
-STEP_S = 0.05  # ibaPDA: minimale updatetijd, 20 telegrammen per seconde
+STEP_S = 0.05  # ibaPDA: minimum update time, 20 telegrams per second
 
 
 def with_heartbeat(**options) -> PacketFormat:
-    """Het standaardtelegram met andere hartslag-instellingen."""
+    """The default telegram with different heartbeat settings."""
     return PacketFormat.from_dict({**DEFAULT, "heartbeat": {**DEFAULT["heartbeat"], **options}})
 
 
@@ -49,14 +49,14 @@ class Clock:
 
 
 def processed(stats: dict) -> int:
-    """Aantal telegrammen dat helemaal is afgehandeld, wat er ook mee gebeurde."""
+    """Number of telegrams that have been fully handled, whatever happened to them."""
     return stats["accepted"] + stats["dropped"] + stats["blocked"] + stats["malformed"]
 
 
 def feed(source, clock, first, count, *, fmt=FORMAT, heartbeat=lambda tick: tick, skip=()) -> None:
-    """Stuur `count` telegrammen met de gesimuleerde signalen, op tijdstip first, first+STEP_S, ...
-    De tikken in `skip` worden niet verstuurd (verlies op de verbinding); `heartbeat(tick)` is de waarde
-    van de hartslag in het telegram."""
+    """Send `count` telegrams with the simulated signals, at time first, first+STEP_S, ...
+    The ticks in `skip` are not sent (loss on the link); `heartbeat(tick)` is the value
+    of the heartbeat in the telegram."""
     sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         for tick in range(count):
@@ -68,7 +68,7 @@ def feed(source, clock, first, count, *, fmt=FORMAT, heartbeat=lambda tick: tick
             sender.sendto(fmt.encode(values, heartbeat=heartbeat(tick)), ("127.0.0.1", source.port))
             deadline = time.monotonic() + 2
             while processed(source.receiver.stats()) == before:
-                assert time.monotonic() < deadline, f"telegram {tick} is niet verwerkt"
+                assert time.monotonic() < deadline, f"telegram {tick} was not processed"
                 time.sleep(0.0002)
     finally:
         sender.close()
@@ -82,7 +82,7 @@ def make_source(clock: Clock, fmt: PacketFormat = FORMAT, **kwargs) -> UdpSource
 def make_app(monkeypatch, source: UdpSource) -> TestClient:
     monkeypatch.setattr(main_module, "create_source", lambda settings: source)
     settings = Settings(_env_file=None, auth_enabled=False, source="udp", udp_allow_any_source=True)
-    return TestClient(create_app(settings))  # gebruik als context manager: dan start de lifespan de ontvanger
+    return TestClient(create_app(settings))  # use as a context manager: then the lifespan starts the receiver
 
 
 def test_dashboard_runs_on_live_udp_data(monkeypatch):
@@ -90,15 +90,15 @@ def test_dashboard_runs_on_live_udp_data(monkeypatch):
     clock = Clock(now - 60)
     source = make_source(clock)
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 60, 1200)  # een minuut data, tot ongeveer nu
+        feed(source, clock, now - 60, 1200)  # a minute of data, up to about now
 
         health = app.get("/api/health").json()
         assert health["source"] == "udp" and health["retention_minutes"] == 10
         ingest = health["ingest"]
         assert ingest["packets"] == 1200 and ingest["listening"] is True and ingest["frozen"] is False
         assert 59 <= ingest["held_s"] <= 60
-        assert ingest["loss_source"] == "estimate" and ingest["loss_percent"] < 1  # volledige stroom: geen verlies
-        assert "127.0.0.1" not in str(health)  # klanten mogen onze netwerkadressen niet zien
+        assert ingest["loss_source"] == "estimate" and ingest["loss_percent"] < 1  # full stream: no loss
+        assert "127.0.0.1" not in str(health)  # customers must not see our network addresses
 
         live = app.get("/api/live?minutes=1").json()
         assert live["ready"] is True and live["stale"] is False
@@ -119,11 +119,11 @@ def test_packet_loss_is_exact_when_the_heartbeat_counts_telegrams(monkeypatch):
     fmt = with_heartbeat(counts_telegrams=True)
     source = make_source(clock, fmt)
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 10, 100, fmt=fmt, skip=(30, 31, 32, 70))  # een gat van 3 en een van 1
+        feed(source, clock, now - 10, 100, fmt=fmt, skip=(30, 31, 32, 70))  # a gap of 3 and one of 1
         ingest = app.get("/api/health").json()["ingest"]
         assert ingest["packets"] == 96 and ingest["loss_source"] == "heartbeat"
         assert ingest["loss_percent"] == pytest.approx(4.0)
-        series = app.get("/api/timeseries?minutes=1").json()  # het gat is gewoon een gat: geen crash, geen NaN
+        series = app.get("/api/timeseries?minutes=1").json()  # the gap is simply a gap: no crash, no NaN
         assert len(series["t"]) > 50 and all(isinstance(v, (int, float)) for v in series["tower_x"])
 
 
@@ -132,27 +132,27 @@ def test_packet_loss_is_estimated_without_a_counting_heartbeat(monkeypatch):
     clock = Clock(now - 15)
     source = make_source(clock)
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 15, 300, skip=range(10, 290, 10))  # 28 van de 300 kwijt
+        feed(source, clock, now - 15, 300, skip=range(10, 290, 10))  # 28 of the 300 lost
         ingest = app.get("/api/health").json()["ingest"]
         assert ingest["packets"] == 272 and ingest["loss_source"] == "estimate"
         assert ingest["loss_percent"] == pytest.approx(100 * 28 / 300, abs=0.5)
 
 
 def test_a_frozen_sender_is_withheld_and_the_dashboard_goes_stale(monkeypatch):
-    """ibaPDA of de PLC blijft dezelfde waarden sturen (met verse aankomsttijden): de hartslag staat stil. Dat mag
-    niet als live data op het scherm komen."""
+    """ibaPDA or the PLC keeps sending the same values (with fresh arrival times): the heartbeat is stuck. That must
+    not show up on screen as live data."""
     now = time.time()
     clock = Clock(now - 30)
-    source = make_source(clock)  # standaardformaat: hartslag zonder tellen, bevroren na 5 s
+    source = make_source(clock)  # default format: heartbeat without counting, frozen after 5 s
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 30, 300, heartbeat=lambda tick: min(tick, 99))  # na tik 99 staat de hartslag stil
+        feed(source, clock, now - 30, 300, heartbeat=lambda tick: min(tick, 99))  # after tick 99 the heartbeat is stuck
         ingest = app.get("/api/health").json()["ingest"]
         assert ingest["frozen"] is True
-        assert 198 <= ingest["packets"] <= 201  # opgeslagen tot 5 s na de laatste verandering
+        assert 198 <= ingest["packets"] <= 201  # stored until 5 s after the last change
         newest = source.cache.stats().newest
         assert newest < now - 30 + 200 * STEP_S
 
-        # de hartslag beweegt weer: vanaf het eerste telegram wordt er weer opgeslagen
+        # the heartbeat moves again: storing resumes from the first telegram
         feed(source, clock, now - 15, 20, heartbeat=lambda tick: 300 + tick)
         ingest = app.get("/api/health").json()["ingest"]
         assert ingest["frozen"] is False and ingest["packets"] >= 198 + 20
@@ -173,7 +173,7 @@ def test_status_goes_stale_when_the_stream_stops(monkeypatch):
     clock = Clock(now - 120)
     source = make_source(clock)
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 120, 400)  # eindigt ~100 s geleden
+        feed(source, clock, now - 120, 400)  # ends ~100 s ago
         live = app.get("/api/live?minutes=5").json()
         assert live["ready"] is True and live["stale"] is True and live["age_s"] > 60
 
@@ -194,7 +194,7 @@ def test_the_cache_only_serves_what_it_keeps(monkeypatch):
     clock = Clock(now - 400)
     source = make_source(clock, cache_minutes=2)
     with make_app(monkeypatch, source) as app:
-        feed(source, clock, now - 400, 8000)  # 400 s data, de cache houdt 120 s vast
+        feed(source, clock, now - 400, 8000)  # 400 s of data, the cache holds 120 s
         assert app.get("/api/health").json()["retention_minutes"] == 2
         series = app.get("/api/timeseries?minutes=10").json()
         assert series["t"][-1] - series["t"][0] <= 121
@@ -205,7 +205,7 @@ def test_app_refuses_to_start_when_the_port_is_taken(monkeypatch):
     blocker.bind(("127.0.0.1", 0))
     try:
         source = make_source(Clock(time.time()), port=blocker.getsockname()[1])
-        with pytest.raises(RuntimeError, match="UDP-poort"):
+        with pytest.raises(RuntimeError, match="UDP port"):
             with make_app(monkeypatch, source):
                 pass
     finally:
@@ -259,8 +259,8 @@ def test_allow_any_source_on_a_reachable_address_needs_a_check_word(tmp_path):
 
     with pytest.raises(ValueError, match="checks"):
         UdpSource.from_settings(settings(layout, "0.0.0.0"))
-    UdpSource.from_settings(settings(layout, "127.0.0.1"))  # lokaal testen blijft kunnen
-    UdpSource.from_settings(settings(with_key, "0.0.0.0"))  # met sleutelwoord mag het, ook zonder bronfilter
+    UdpSource.from_settings(settings(layout, "127.0.0.1"))  # testing locally remains possible
+    UdpSource.from_settings(settings(with_key, "0.0.0.0"))  # with a key word it is allowed, even without a source filter
 
 
 def test_read_returns_aware_utc_frames_with_all_signals():

@@ -8,19 +8,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Eerst alleen de afhankelijkheden: aparte laag, dus code-wijzigingen herbouwen snel.
-# requirements.txt is vastgepind met hashes (zie de kop van dat bestand om hem te vernieuwen).
+# Dependencies first, on their own layer, so code changes rebuild quickly.
+# requirements.txt is pinned with hashes (see the header of that file to refresh it).
 COPY requirements.txt .
 RUN pip install --require-hashes -r requirements.txt
 
 COPY alma ./alma
 COPY frontend ./frontend
-# Placeholder-signaalmap; in productie met een volume over deze file heen mounten (zie docker-compose.yml).
+# Placeholder signal map; in production mount a volume over this file (see docker-compose.override.yml).
 COPY signals.json ./signals.json
-# Standaard telegramformaat; in productie met een volume over deze file heen mounten.
+# Default telegram format; in production mount a volume over this file.
 COPY udp_format.json ./udp_format.json
 
-# Geen root in de container.
+# No root in the container.
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin alma
 USER alma
 
@@ -29,6 +29,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
 
-# TLS en de publieke URL regelt de reverse proxy; zie README. Achter een proxy kan uvicorn de echte
-# client-IP's in de logs tonen als FORWARDED_ALLOW_IPS op het proxy-netwerk wordt gezet.
+# TLS and the public URL are handled by the reverse proxy; see README. Behind a proxy uvicorn can show the real
+# client IPs in the logs if FORWARDED_ALLOW_IPS is set to the proxy network.
 CMD ["uvicorn", "alma.main:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8000"]

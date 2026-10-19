@@ -1,13 +1,13 @@
-"""Controleer stap voor stap de verbinding met een ibaHD-server.
+"""Check the connection to an ibaHD server step by step.
 
-    python -m alma.ibahd_check                      # standaardpaden: secrets/quick_connect.json en signals.json
-    python -m alma.ibahd_check --list               # alle kanalen, met het ID dat in signals.json moet
-    python -m alma.ibahd_check --grep tower         # alleen kanalen waarvan naam, ID of commentaar dit bevat
+    python -m alma.ibahd_check                      # default paths: secrets/quick_connect.json and signals.json
+    python -m alma.ibahd_check --list               # all channels, with the ID that belongs in signals.json
+    python -m alma.ibahd_check --grep tower         # only channels whose name, ID or comment contains this
     python -m alma.ibahd_check --channel "store\\[0:0]" --minutes 5
 
 In Docker: docker compose run --rm alma python -m alma.ibahd_check
 
-Exitcode 0 als alles werkt. De ApiKey wordt nooit geprint.
+Exit code 0 if everything works. The ApiKey is never printed.
 """
 
 import argparse
@@ -22,13 +22,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 if "--verbose" not in sys.argv:
-    os.environ.setdefault("GRPC_VERBOSITY", "NONE")  # de C-laag meldt anders elke mislukte verbinding apart
+    os.environ.setdefault("GRPC_VERBOSITY", "NONE")  # the C layer would otherwise report every failed connection separately
 
 try:
     import grpc
     from ibahd_api import ibahd_api_pb2 as pb
 except ImportError:  # pragma: no cover
-    sys.exit('ibahd-api ontbreekt. Installeer met: pip install -e ".[ibahd]"')
+    sys.exit('ibahd-api is missing. Install with: pip install -e ".[ibahd]"')
 
 from alma.config import ROOT, SIGNALS
 from alma.sources.base import SourceUnavailable
@@ -43,15 +43,15 @@ from alma.sources.ibahd import (
     to_us,
 )
 
-MIN_UNIX_US = 946_684_800_000_000  # 2000-01-01; alles daaronder of ver in de toekomst is geen µs sinds 1970
+MIN_UNIX_US = 946_684_800_000_000  # 2000-01-01; anything below it, or far in the future, is not µs since 1970
 STALE_AFTER = timedelta(seconds=30)
-PROBE_COUNT = 3  # zoveel kanalen uit het schema lezen als de signaalmap nog niet klaar is
-MIN_RATE_HZ = 2.0  # de torenfrequentie is ~0,3 Hz; onder dit tempo is die slecht te bepalen
+PROBE_COUNT = 3  # read this many channels from the schema while the signal map is not ready yet
+MIN_RATE_HZ = 2.0  # the tower frequency is ~0.3 Hz; below this rate it is hard to determine
 TYPE_NAMES = {
     pb.DATA_TYPE_FLOAT_VALUES: "float",
     pb.DATA_TYPE_DOUBLE_VALUES: "double",
-    pb.DATA_TYPE_DIGITAL_VALUES: "digitaal",
-    pb.DATA_TYPE_STRING_VALUES: "tekst",
+    pb.DATA_TYPE_DIGITAL_VALUES: "digital",
+    pb.DATA_TYPE_STRING_VALUES: "text",
 }
 SUPPORTED_TYPES = {pb.DATA_TYPE_FLOAT_VALUES, pb.DATA_TYPE_DOUBLE_VALUES, pb.DATA_TYPE_DIGITAL_VALUES}
 
@@ -73,11 +73,11 @@ class Report:
 
     def warn(self, text: str) -> None:
         self.warnings += 1
-        self.out(f"  LET OP {text}")
+        self.out(f"  WARN   {text}")
 
     def fail(self, text: str, hint: str | None = None) -> None:
         self.failures += 1
-        self.out(f"  FOUT   {text}")
+        self.out(f"  ERROR  {text}")
         if hint:
             self.out(f"         -> {hint}")
 
@@ -89,7 +89,7 @@ class Report:
 
 @dataclass
 class Channel:
-    request_id: str  # zoals de data-aanroepen en signals.json het willen
+    request_id: str  # as the data calls and signals.json want it
     name: str
     unit: str
     data_type: int
@@ -103,7 +103,7 @@ class Channel:
 
 
 def certificate_names(pem: str) -> tuple[list[str], datetime] | None:
-    """(DNS-namen en IP's uit het certificaat, einddatum), of None als het geen leesbaar PEM is."""
+    """(DNS names and IPs from the certificate, expiry date), or None if it is not readable PEM."""
     from cryptography import x509
 
     try:
@@ -126,67 +126,67 @@ def host_in_names(host: str, names: list[str]) -> bool:
 
 
 def check_quick_connect(r: Report, path: Path) -> tuple[dict, list[str] | None] | None:
-    r.step(f"Quick-connect-bestand ({path})")
+    r.step(f"Quick-connect file ({path})")
     try:
         quick_connect = load_quick_connect(path)
     except ValueError as err:
-        r.fail(str(err), "Exporteer de quick-connect-gegevens in ibaHD Manager naar dit bestand.")
+        r.fail(str(err), "Export the quick-connect data from ibaHD Manager to this file.")
         return None
-    r.ok(f"Host {quick_connect['Host']}, poort {quick_connect['Port']}, ApiKey aanwezig")
+    r.ok(f"Host {quick_connect['Host']}, port {quick_connect['Port']}, ApiKey present")
 
     cert = certificate_names(quick_connect["TlsServerCertificate"])
     if cert is None:
-        r.fail("TlsServerCertificate is geen leesbaar PEM-certificaat", "Kopieer het hele certificaat, inclusief BEGIN/END-regels.")
+        r.fail("TlsServerCertificate is not a readable PEM certificate", "Copy the whole certificate, including the BEGIN/END lines.")
         return None
     names, expires = cert
-    r.info(f"Certificaat geldig voor: {', '.join(names) or '(geen namen)'}; verloopt {expires:%Y-%m-%d}")
+    r.info(f"Certificate valid for: {', '.join(names) or '(no names)'}; expires {expires:%Y-%m-%d}")
     if expires < datetime.now(timezone.utc):
-        r.fail("Het certificaat is verlopen", "Maak in ibaHD Manager een nieuw certificaat en quick-connect-bestand aan.")
+        r.fail("The certificate has expired", "Create a new certificate and quick-connect file in ibaHD Manager.")
     if not host_in_names(str(quick_connect["Host"]), names):
         r.warn(
-            f"Host {quick_connect['Host']!r} staat niet in het certificaat; de TLS-handshake mislukt dan "
-            "waarschijnlijk. Gebruik als Host een naam of IP uit de lijst hierboven."
+            f"Host {quick_connect['Host']!r} is not in the certificate; the TLS handshake will then probably "
+            "fail. Use a name or IP from the list above as Host."
         )
     return quick_connect, names
 
 
 def check_network(r: Report, host: str, port) -> bool:
-    r.step(f"Netwerkverbinding met {host}:{port}")
+    r.step(f"Network connection to {host}:{port}")
     try:
         with socket.create_connection((host, int(port)), timeout=5):
             pass
     except socket.gaierror:
-        r.fail(f"Hostnaam {host!r} is niet te vinden", "Controleer de naam (DNS of hosts-bestand), of gebruik het IP-adres.")
+        r.fail(f"Hostname {host!r} cannot be resolved", "Check the name (DNS or hosts file), or use the IP address.")
     except (OSError, ValueError) as err:
         r.fail(
-            f"Geen TCP-verbinding ({err})",
-            "Draait ibaHD-Server? Staat de API in ibaHD Manager aan op deze poort? Laat de firewall de poort door?",
+            f"No TCP connection ({err})",
+            "Is ibaHD-Server running? Is the API enabled in ibaHD Manager on this port? Does the firewall allow the port?",
         )
     else:
-        r.ok("Poort bereikbaar")
+        r.ok("Port reachable")
         return True
     return False
 
 
 def check_stores(r: Report, client, host: str, cert_names: list[str] | None) -> list[str] | None:
-    r.step("Inloggen en HD-stores ophalen (TLS + ApiKey)")
+    r.step("Logging in and fetching HD stores (TLS + ApiKey)")
     try:
         response = client.GetHdStores(pb.GetHdStoresRequest(), timeout=CALL_TIMEOUT_S)
     except grpc.RpcError as err:
         hint = None
         if err.code() == grpc.StatusCode.UNAVAILABLE and cert_names is not None and not host_in_names(host, cert_names):
-            hint = f"Waarschijnlijk de hostnaam: {host!r} staat niet in het certificaat ({', '.join(cert_names) or 'geen namen'})."
+            hint = f"Probably the hostname: {host!r} is not in the certificate ({', '.join(cert_names) or 'no names'})."
         r.rpc_fail(err, hint)
         return None
-    r.ok(f"Ingelogd; {len(response.hd_stores)} store(s)")
+    r.ok(f"Logged in; {len(response.hd_stores)} store(s)")
     time_stores = []
     for store in response.hd_stores:
         kind = pb.HdStoreType.Name(store.hd_store_type).removeprefix("HD_STORE_TYPE_").lower()
-        r.info(f"{store.hd_store_name:<32} {kind:<12} ingeschakeld={store.enabled} actief={store.active}")
+        r.info(f"{store.hd_store_name:<32} {kind:<12} enabled={store.enabled} active={store.active}")
         if store.hd_store_type == pb.HD_STORE_TYPE_TIME and store.enabled:
             time_stores.append(store.hd_store_name)
     if not time_stores:
-        r.warn("Geen ingeschakelde tijd-store gevonden; er is dus geen meetdata om te lezen")
+        r.warn("No enabled time store found; so there is no measurement data to read")
     return time_stores
 
 
@@ -208,7 +208,7 @@ def collect_channels(group, store: str, path: list[str], found: list[Channel]) -
 
 
 def check_schema(r: Report, client, stores: list[str], list_all: bool, grep: str | None) -> list[Channel] | None:
-    r.step("Kanalen uit het schema van de tijd-stores")
+    r.step("Channels from the schema of the time stores")
     channels: list[Channel] = []
     for store in stores:
         try:
@@ -216,63 +216,63 @@ def check_schema(r: Report, client, stores: list[str], list_all: bool, grep: str
                 pb.GetHdStoreSchemaRequest(hd_store_name=store, sort_by=pb.SORT_BY_MODULE), timeout=CALL_TIMEOUT_S
             )
         except grpc.RpcError as err:
-            r.rpc_fail(err, f"Schema van store {store!r} niet op te halen; zonder licentie ibaHD-Server-API-Read kan dat mislukken.")
+            r.rpc_fail(err, f"Cannot fetch the schema of store {store!r}; without the ibaHD-Server-API-Read licence this can fail.")
             return None
         found: list[Channel] = []
         collect_channels(schema.root_group, store, [], found)
         kinds: dict[str, int] = {}
         for ch in found:
             kinds[ch.kind] = kinds.get(ch.kind, 0) + 1
-        r.ok(f"{store}: {len(found)} kanalen ({', '.join(f'{n} {k}' for k, n in sorted(kinds.items())) or 'leeg'})")
+        r.ok(f"{store}: {len(found)} channels ({', '.join(f'{n} {k}' for k, n in sorted(kinds.items())) or 'empty'})")
         channels += found
 
     shown = channels
     if grep:
         needle = grep.lower()
         shown = [c for c in channels if needle in f"{c.request_id} {c.name} {c.path} {c.comments}".lower()]
-        r.info(f"{len(shown)} van {len(channels)} kanalen bevatten {grep!r}")
+        r.info(f"{len(shown)} of {len(channels)} channels contain {grep!r}")
     elif not list_all:
         shown = channels[:10]
     for ch in shown:
         unit = f" [{ch.unit}]" if ch.unit else ""
-        flag = "" if ch.active else "  (niet actief)"
+        flag = "" if ch.active else "  (not active)"
         r.info(f"{ch.request_id:<34} {ch.name}{unit}  {ch.kind}  {ch.path}{flag}")
     if not grep and not list_all and len(channels) > len(shown):
-        r.info(f"... en {len(channels) - len(shown)} meer; gebruik --list of --grep <tekst>")
-    r.info("In signals.json hoort het ID uit de eerste kolom.")
+        r.info(f"... and {len(channels) - len(shown)} more; use --list or --grep <text>")
+    r.info("signals.json takes the ID from the first column.")
     return channels
 
 
 def check_signal_map(r: Report, path: Path, channels: list[Channel]) -> dict[str, Channel] | None:
-    """Geeft {signaal: kanaal} als alle signalen kloppen, anders None."""
-    r.step(f"Signaalmap ({path})")
+    """Returns {signal: channel} if all signals are valid, otherwise None."""
+    r.step(f"Signal map ({path})")
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as err:
-        r.fail(f"Niet te lezen: {type(err).__name__}", "Zie signals.json in de projectmap voor het formaat.")
+        r.fail(f"Cannot be read: {type(err).__name__}", "See signals.json in the project folder for the format.")
         return None
     by_id = {c.request_id: c for c in channels}
     resolved: dict[str, Channel] = {}
     for signal in SIGNALS:
         value = raw.get(signal, "")
         if not value or value.startswith("<"):
-            r.warn(f"{signal}: nog niet ingevuld")
+            r.warn(f"{signal}: not filled in yet")
             continue
         channel = by_id.get(value)
         if channel is None:
             near = [c.request_id for c in channels if value in c.request_id or c.request_id.endswith(value)][:3]
             r.fail(
-                f"{signal}: {value!r} komt niet voor in het schema",
-                f"Bedoelde je: {', '.join(near)}?" if near else "Zoek het ID met --grep <tekst> of --list.",
+                f"{signal}: {value!r} does not occur in the schema",
+                f"Did you mean: {', '.join(near)}?" if near else "Find the ID with --grep <text> or --list.",
             )
         elif channel.data_type not in SUPPORTED_TYPES:
-            r.fail(f"{signal}: {value!r} heeft datatype {channel.kind}", "Alleen float-, double- en digitale kanalen worden ondersteund.")
+            r.fail(f"{signal}: {value!r} has data type {channel.kind}", "Only float, double and digital channels are supported.")
         else:
             resolved[signal] = channel
             unit = f" [{channel.unit}]" if channel.unit else ""
             r.ok(f"{signal:<20} -> {value}  ({channel.name}{unit}, {channel.kind})")
             if not channel.active:
-                r.warn(f"{signal}: het kanaal staat in ibaHD op niet actief")
+                r.warn(f"{signal}: the channel is set to not active in ibaHD")
     return resolved if len(resolved) == len(SIGNALS) else None
 
 
@@ -287,9 +287,9 @@ def channel_value_text(v) -> str:
 
 
 def check_last_values(r: Report, client, ids: list[str]) -> datetime | None:
-    """Laatste waarde per kanaal. Dit controleert ook de tijdeenheid: een tijdstempel in de verkeerde
-    eenheid valt buiten het verwachte bereik. Geeft de nieuwste meting terug."""
-    r.step("Laatste waarde per kanaal")
+    """Last value per channel. This also checks the time unit: a timestamp in the wrong unit falls
+    outside the expected range. Returns the newest measurement."""
+    r.step("Last value per channel")
     now = datetime.now(timezone.utc)
     try:
         response = client.GetLastRecordedChannelValue(
@@ -304,17 +304,17 @@ def check_last_values(r: Report, client, ids: list[str]) -> datetime | None:
     for channel_id in ids:
         value = got.get(channel_id)
         if value is None:
-            r.warn(f"{channel_id}: geen waarde ontvangen (kanaal zonder opgenomen data?)")
+            r.warn(f"{channel_id}: no value received (channel without recorded data?)")
             continue
         if not MIN_UNIX_US <= value.timestamp <= to_us(now) + 86_400_000_000:
             r.fail(
-                f"{channel_id}: tijdstempel {value.timestamp} is geen microseconden sinds 1970 (nu is ~{to_us(now)})",
-                "De server gebruikt mogelijk een andere tijdeenheid; pas to_us/from_us in alma/sources/ibahd.py aan.",
+                f"{channel_id}: timestamp {value.timestamp} is not microseconds since 1970 (now is ~{to_us(now)})",
+                "The server may use a different time unit; adjust to_us/from_us in alma/sources/ibahd.py.",
             )
             continue
         stamp = from_us([value.timestamp])[0].to_pydatetime()
         newest = max(newest, stamp) if newest else stamp
-        r.ok(f"{channel_id:<34} {channel_value_text(value):>12}   {stamp:%Y-%m-%d %H:%M:%S}Z ({age_text(now - stamp)} geleden)")
+        r.ok(f"{channel_id:<34} {channel_value_text(value):>12}   {stamp:%Y-%m-%d %H:%M:%S}Z ({age_text(now - stamp)} ago)")
     return newest
 
 
@@ -324,16 +324,16 @@ def age_text(age: timedelta) -> str:
         return f"{seconds:.0f} s"
     if seconds < 7200:
         return f"{seconds / 60:.0f} min"
-    return f"{seconds / 3600:.1f} uur" if seconds < 172_800 else f"{seconds / 86_400:.0f} dagen"
+    return f"{seconds / 3600:.1f} h" if seconds < 172_800 else f"{seconds / 86_400:.0f} days"
 
 
 def check_history(r: Report, client, mapping: dict[str, str], newest: datetime | None, minutes: float) -> None:
-    r.step(f"Meetreeks van {minutes:g} min uitlezen (zoals het dashboard dat doet)")
+    r.step(f"Reading a {minutes:g} min series (as the dashboard does)")
     end = datetime.now(timezone.utc)
     if newest is not None and end - newest > STALE_AFTER:
         r.warn(
-            f"De nieuwste meting is {age_text(end - newest)} oud: het dashboard zou NO DATA tonen. "
-            "Ik lees het venster dat op die meting eindigt."
+            f"The newest measurement is {age_text(end - newest)} old: the dashboard would show NO DATA. "
+            "I am reading the window that ends at that measurement."
         )
         end = newest + timedelta(seconds=1)
     start = end - timedelta(minutes=minutes)
@@ -343,23 +343,23 @@ def check_history(r: Report, client, mapping: dict[str, str], newest: datetime |
         r.fail(str(err))
         return
     if frame.empty:
-        r.fail("Geen rijen ontvangen in dit venster", "Wordt er data opgenomen? Probeer een groter venster met --minutes.")
+        r.fail("No rows received in this window", "Is data being recorded? Try a larger window with --minutes.")
         return
     slack = timedelta(seconds=1)
     if frame.index[0] < start - slack or frame.index[-1] > end + slack:
-        r.fail(f"Tijden {frame.index[0]} .. {frame.index[-1]} liggen buiten het gevraagde venster", "Wijst op een tijdeenheid-probleem.")
+        r.fail(f"Times {frame.index[0]} .. {frame.index[-1]} lie outside the requested window", "Points to a time unit problem.")
     median_dt = float(frame.index.to_series().diff().dt.total_seconds().median()) if len(frame) > 1 else float("nan")
     rate = 1 / median_dt if median_dt > 0 else float("nan")
-    r.ok(f"{len(frame)} rijen van {frame.index[0]:%H:%M:%S.%f}Z tot {frame.index[-1]:%H:%M:%S.%f}Z, ongeveer {rate:.3g} Hz")
+    r.ok(f"{len(frame)} rows from {frame.index[0]:%H:%M:%S.%f}Z to {frame.index[-1]:%H:%M:%S.%f}Z, about {rate:.3g} Hz")
     if rate < MIN_RATE_HZ:
-        r.warn(f"Onder {MIN_RATE_HZ:g} Hz is de torenfrequentie (~0,3 Hz) slecht te bepalen; ruwe data (GetRawChannelData) kan beter zijn.")
+        r.warn(f"Below {MIN_RATE_HZ:g} Hz the tower frequency (~0.3 Hz) is hard to determine; raw data (GetRawChannelData) may be better.")
     for name in frame.columns:
         col = frame[name]
-        r.info(f"{name:<22} min {col.min():.4g}  max {col.max():.4g}  gemiddeld {col.mean():.4g}")
+        r.info(f"{name:<22} min {col.min():.4g}  max {col.max():.4g}  mean {col.mean():.4g}")
 
 
 def pick_probe_channels(channels: list[Channel]) -> dict[str, str]:
-    """Zolang de signaalmap leeg is: een paar actieve analoge kanalen om de leespijplijn mee te testen."""
+    """While the signal map is empty: a few active analog channels to test the read pipeline with."""
     analog = [c for c in channels if c.active and c.data_type in (pb.DATA_TYPE_FLOAT_VALUES, pb.DATA_TYPE_DOUBLE_VALUES)]
     return {c.name or c.request_id: c.request_id for c in analog[:PROBE_COUNT]}
 
@@ -400,7 +400,7 @@ def run(
         else:
             mapping = pick_probe_channels(channels)
             if mapping:
-                r.info("Signaalmap nog niet compleet: ik test het uitlezen met de eerste kanalen uit het schema.")
+                r.info("Signal map not complete yet: I am testing the read with the first channels from the schema.")
         if mapping:
             newest = check_last_values(r, client, list(mapping.values()))
             check_history(r, client, mapping, newest, minutes)
@@ -409,18 +409,18 @@ def run(
 
     r.out("\n" + "-" * 60)
     if r.failures:
-        r.out(f"Resultaat: {r.failures} fout(en), {r.warnings} waarschuwing(en). Los de FOUT-regels op, van boven naar beneden.")
+        r.out(f"Result: {r.failures} error(s), {r.warnings} warning(s). Fix the ERROR lines, from top to bottom.")
         return False
-    r.out(f"Resultaat: verbinding werkt ({r.warnings} waarschuwing(en)).")
+    r.out(f"Result: connection works ({r.warnings} warning(s)).")
     if not resolved:
-        r.out("Volgende stap: vul signals.json met de kanaal-ID's (zie --list / --grep) en draai dit opnieuw.")
+        r.out("Next step: fill signals.json with the channel IDs (see --list / --grep) and run this again.")
     else:
-        r.out("Volgende stap: zet ALMA_SOURCE=ibahd en start het dashboard.")
+        r.out("Next step: set ALMA_SOURCE=ibahd and start the dashboard.")
     return True
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m alma.ibahd_check", description="Controleer de verbinding met ibaHD.")
+    parser = argparse.ArgumentParser(prog="python -m alma.ibahd_check", description="Check the connection to ibaHD.")
     parser.add_argument(
         "--quick-connect",
         type=Path,
@@ -429,14 +429,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--signal-map", type=Path, default=Path(os.environ.get("ALMA_SIGNAL_MAP", ROOT / "signals.json"))
     )
-    parser.add_argument("--list", action="store_true", dest="list_all", help="toon alle kanalen")
-    parser.add_argument("--grep", help="toon alleen kanalen waarvan naam, ID of commentaar dit bevat")
-    parser.add_argument("--channel", action="append", default=[], help="lees dit kanaal-ID uit (herhaalbaar)")
-    parser.add_argument("--minutes", type=float, default=1.0, help="lengte van de uitgelezen meetreeks")
-    parser.add_argument("--verbose", action="store_true", help="toon ook de ruwe gRPC-foutmelding")
+    parser.add_argument("--list", action="store_true", dest="list_all", help="show all channels")
+    parser.add_argument("--grep", help="show only channels whose name, ID or comment contains this")
+    parser.add_argument("--channel", action="append", default=[], help="read this channel ID (repeatable)")
+    parser.add_argument("--minutes", type=float, default=1.0, help="length of the series to read")
+    parser.add_argument("--verbose", action="store_true", help="also show the raw gRPC error message")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="replace")  # een Windows-console kent niet elk teken
+        sys.stdout.reconfigure(errors="replace")  # a Windows console does not know every character
     ok = run(
         args.quick_connect,
         args.signal_map,

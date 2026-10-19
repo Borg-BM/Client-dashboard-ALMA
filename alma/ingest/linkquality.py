@@ -1,16 +1,16 @@
-"""Verbindingskwaliteit uit aankomsttijden, voor als het telegram geen telbare hartslag heeft."""
+"""Link quality from arrival times, for when the telegram has no countable heartbeat."""
 
 import numpy as np
 
-MIN_SAMPLES = 20  # minder pakketten zeggen niets over het ritme
+MIN_SAMPLES = 20  # fewer packets say nothing about the rhythm
 
 
 def estimate_loss_percent(times) -> float | None:
-    """Schat het pakketverlies uit de aankomsttijden (epoch-seconden, oplopend).
+    """Estimate packet loss from the arrival times (epoch seconds, increasing).
 
-    Het mediane interval is de zendperiode; wat daar in de gaten bij ontbreekt telt als verloren, dus ook een
-    uitval van Starlink. Dit werkt zonder teller in het telegram, maar blijft een schatting: None bij te weinig
-    pakketten of een onbruikbaar ritme."""
+    The median interval is the sending period; whatever is missing from the gaps counts as lost, so a Starlink
+    outage too. This works without a counter in the telegram, but remains an estimate: None for too few
+    packets or an unusable rhythm."""
     times = np.asarray(times, dtype=float)
     if len(times) < MIN_SAMPLES or not np.isfinite(times).all():
         return None

@@ -1,12 +1,12 @@
-"""Live databron: UDP-telegrammen van iba, de laatste paar minuten in een geheugencache.
+"""Live data source: UDP telegrams from iba, the last few minutes held in an in-memory cache.
 
-De ibaHD-server levert niet in realtime. iba (ibaPDA, Generic UDP output module) stuurt daarom elke
-cyclus een telegram met alle signalen naar deze poort. De ontvanger decodeert ze volgens
-udp_format.json en schrijft ze in een ringbuffer; read() leest daar het gevraagde venster uit, zodat
-analyse en API niet merken dat de data live binnenkomt.
+The ibaHD server does not deliver in real time. iba (ibaPDA, Generic UDP output module) therefore sends
+a telegram with all signals to this port every cycle. The receiver decodes them according to
+udp_format.json and writes them into a ring buffer; read() reads the requested window from it, so that
+analysis and API do not notice that the data arrives live.
 
-Eén proces: de ontvanger is een thread met een eigen socket. Meerdere uvicorn-workers zouden elk
-dezelfde poort willen openen en de pakketten onderling verdelen; draai dit dus met één worker.
+One process: the receiver is a thread with its own socket. Multiple uvicorn workers would each want to
+open the same port and split the packets between them; so run this with a single worker.
 """
 
 import ipaddress
@@ -23,11 +23,11 @@ from alma.ingest.format import PacketFormat
 from alma.ingest.linkquality import estimate_loss_percent
 from alma.ingest.receiver import UdpReceiver
 
-# Modenummer: bij het inkrimpen van een venster telt het maximum, zodat een korte periode blijft staan en er geen
-# gemiddelde van modenummers ontstaat.
+# Mode number: when a window is shrunk the maximum counts, so that a short period is preserved and no
+# average of mode numbers arises.
 FLAG_SIGNALS = ("system_mode",)
 
-LOSS_WINDOW_S = 60  # over welke terugblik het verlies wordt geschat
+LOSS_WINDOW_S = 60  # the look-back over which the loss is estimated
 
 
 class UdpSource:
@@ -44,7 +44,7 @@ class UdpSource:
         max_samples: int = 200_000,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        self.retention_minutes = cache_minutes  # de frontend biedt geen langere perioden aan
+        self.retention_minutes = cache_minutes  # the frontend offers no longer periods
         self._clock = clock
         self.cache = SampleCache(
             SIGNALS, retention_s=cache_minutes * 60, max_samples=max_samples, flags=FLAG_SIGNALS, clock=clock
@@ -57,12 +57,12 @@ class UdpSource:
     def from_settings(cls, settings: Settings) -> "UdpSource":
         fmt = PacketFormat.load(settings.udp_format, required_signals=SIGNALS)
         if settings.udp_allow_any_source and not fmt.checks and not ipaddress.ip_address(settings.udp_bind).is_loopback:
-            # Het schip komt via Starlink (wisselend adres), dus een bronfilter is daar vaak niet bruikbaar. Dan
-            # moet het telegram zelf minstens een sleutelwoord dragen, anders kan iedereen op internet meeschrijven.
+            # The ship connects via Starlink (changing address), so a source filter is often not usable there. In that
+            # case the telegram itself must carry at least a key word, otherwise anyone on the internet can write to it.
             raise ValueError(
-                "ALMA_UDP_ALLOW_ANY_SOURCE=true op een niet-lokaal adres vereist een 'checks'-sleutelwoord in "
-                f"{settings.udp_format.name}; anders kan iedereen die de poort bereikt metingen invoeren. "
-                "Gebruik liever een VPN-tunnel met ALMA_UDP_ALLOWED_SOURCES (zie de README)"
+                "ALMA_UDP_ALLOW_ANY_SOURCE=true on a non-local address requires a 'checks' key word in "
+                f"{settings.udp_format.name}; otherwise anyone who can reach the port can inject measurements. "
+                "Preferably use a VPN tunnel with ALMA_UDP_ALLOWED_SOURCES (see the README)"
             )
         return cls(
             fmt,
@@ -87,7 +87,7 @@ class UdpSource:
         return self.cache.window(start.timestamp(), end.timestamp(), max_points)
 
     def _loss(self, received: dict) -> tuple[float | None, str | None]:
-        """Exact verlies als de hartslag telegrammen telt, anders een schatting over de laatste minuut."""
+        """Exact loss if the heartbeat counts telegrams, otherwise an estimate over the last minute."""
         if received["loss_percent"] is not None:
             return received["loss_percent"], "heartbeat"
         now = self._clock()
@@ -96,8 +96,8 @@ class UdpSource:
         return estimate, None if estimate is None else "estimate"
 
     def stats(self) -> dict:
-        """Tellers voor /api/health. Die kunnen alle ingelogde gebruikers (ook klanten) opvragen: dus
-        geen IP-adressen of poorten van ons netwerk. De details staan in de logs en in alma.udp_check."""
+        """Counters for /api/health. All logged-in users (including customers) can request them: so
+        no IP addresses or ports of our network. The details are in the logs and in alma.udp_check."""
         received = self.receiver.stats()
         cache = self.cache.stats()
         held = cache.newest - cache.oldest if cache.rows else 0.0
@@ -106,7 +106,7 @@ class UdpSource:
             "listening": self.receiver.running,
             "packets": received["accepted"],
             "last_packet_age_s": received["last_packet_age_s"],
-            "frozen": received["frozen"],  # True: de afzender stuurt wel, maar de hartslag staat stil
+            "frozen": received["frozen"],  # True: the sender does send, but the heartbeat is stuck
             "loss_percent": None if loss is None else round(loss, 1),
             "loss_source": loss_source,
             "held_s": round(held, 1),

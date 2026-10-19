@@ -1,1 +1,1 @@
-"""Live ingest van UDP-telegrammen."""
+"""Live ingest of UDP telegrams."""

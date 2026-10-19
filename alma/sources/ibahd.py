@@ -1,12 +1,12 @@
-"""Echte databron via de ibaHD-API (gRPC). Vereist de ibaHD-Server-API-Read licentie.
+"""Real data source via the ibaHD API (gRPC). Requires the ibaHD-Server-API-Read licence.
 
-Conventies van de API (volgens het tutorial-notebook van iba): tijden zijn microseconden sinds
-1970 (UTC) en kanaal-ID's hebben de vorm "<store>\\<kanaal>". Controleer dit tegen een echte server
-met `python -m alma.ibahd_check`.
+API conventions (per iba's tutorial notebook): times are microseconds since 1970 (UTC) and
+channel IDs have the form "<store>\\<channel>". Verify this against a real server with
+`python -m alma.ibahd_check`.
 
-Aggregated data (gemiddelde per bucket) is geschikt voor trends, RMS en frequentieanalyse zolang de
-buckets veel korter zijn dan een trillingsperiode: 40.000 punten over maximaal 60 minuten is ~11 Hz,
-tegen een torenfrequentie van ~0,3 Hz.
+Aggregated data (average per bucket) is suitable for trends, RMS and frequency analysis as long as the
+buckets are much shorter than a vibration period: 40,000 points over at most 60 minutes is ~11 Hz,
+against a tower frequency of ~0.3 Hz.
 """
 
 import json
@@ -22,26 +22,26 @@ from ibahd_api import utils
 from alma.config import SIGNALS
 from alma.sources.base import SourceUnavailable
 
-CALL_TIMEOUT_S = 15  # zonder time-out blijft het dashboard hangen als de server niet antwoordt
+CALL_TIMEOUT_S = 15  # without a timeout the dashboard hangs when the server does not answer
 QUICK_CONNECT_KEYS = ("Host", "Port", "ApiKey", "TlsServerCertificate")
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 ONE_US = timedelta(microseconds=1)
 
-# Hoe een mislukte aanroep vermoedelijk te verklaren is. Dit zijn aannames over het gedrag van de
-# server; de ruwe code en tekst van de server staan er altijd bij.
+# How a failed call can probably be explained. These are assumptions about the behaviour of the
+# server; the raw code and text from the server are always included.
 RPC_HINTS = {
-    grpc.StatusCode.UNAVAILABLE: "server niet bereikbaar, of de TLS-handshake mislukt (staat de hostnaam in het certificaat?)",
-    grpc.StatusCode.UNAUTHENTICATED: "ApiKey onbekend, ingetrokken of verlopen",
-    grpc.StatusCode.PERMISSION_DENIED: "de ApiKey mag dit niet, of de licentie ibaHD-Server-API-Read ontbreekt of is verlopen",
-    grpc.StatusCode.UNIMPLEMENTED: "de server kent deze aanroep niet (licentie of serverversie)",
-    grpc.StatusCode.DEADLINE_EXCEEDED: f"de server antwoordt niet binnen {CALL_TIMEOUT_S} s",
-    grpc.StatusCode.NOT_FOUND: "store of kanaal bestaat niet; controleer de namen en de kanaal-ID's",
-    grpc.StatusCode.INVALID_ARGUMENT: "de server wijst de aanvraag af; controleer kanaal-ID's en tijdbereik",
+    grpc.StatusCode.UNAVAILABLE: "server unreachable, or the TLS handshake failed (is the hostname in the certificate?)",
+    grpc.StatusCode.UNAUTHENTICATED: "ApiKey unknown, revoked or expired",
+    grpc.StatusCode.PERMISSION_DENIED: "the ApiKey is not allowed to do this, or the ibaHD-Server-API-Read licence is missing or has expired",
+    grpc.StatusCode.UNIMPLEMENTED: "the server does not know this call (licence or server version)",
+    grpc.StatusCode.DEADLINE_EXCEEDED: f"the server does not answer within {CALL_TIMEOUT_S} s",
+    grpc.StatusCode.NOT_FOUND: "store or channel does not exist; check the names and the channel IDs",
+    grpc.StatusCode.INVALID_ARGUMENT: "the server rejects the request; check channel IDs and time range",
 }
 
 
 def to_us(moment: datetime) -> int:
-    """Tijdstip (met tijdzone) als microseconden sinds 1970, de eenheid van de ibaHD-API."""
+    """Moment in time (timezone-aware) as microseconds since 1970, the unit of the ibaHD API."""
     return (moment.astimezone(timezone.utc) - EPOCH) // ONE_US
 
 
@@ -50,43 +50,43 @@ def from_us(values) -> pd.DatetimeIndex:
 
 
 def request_channel_id(store: str, channel_id: str) -> str:
-    """Kanaal-ID zoals de data-aanroepen dat willen: "<store>\\<kanaal>". Staat de store er al voor, dan
-    blijft het ID ongewijzigd."""
+    """Channel ID as the data calls want it: "<store>\\<channel>". If the store is already in front,
+    the ID is left unchanged."""
     return channel_id if channel_id.startswith(f"{store}\\") else f"{store}\\{channel_id}"
 
 
 def describe_rpc_error(err: grpc.RpcError) -> str:
     code, details = err.code(), err.details()
     hint = RPC_HINTS.get(code)
-    return f"{code.name}: {details}" + (f" (meestal: {hint})" if hint else "")
+    return f"{code.name}: {details}" + (f" (usually: {hint})" if hint else "")
 
 
 def load_quick_connect(path: Path) -> dict:
-    """Lees het quick-connect-bestand uit ibaHD Manager. De foutmeldingen bevatten nooit de ApiKey."""
+    """Read the quick-connect file from ibaHD Manager. The error messages never contain the ApiKey."""
     try:
-        # utf-8-sig: Kladblok slaat JSON graag op met een BOM
+        # utf-8-sig: Notepad likes to save JSON with a BOM
         quick_connect = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
-        raise ValueError(f"Quick-connect-bestand niet gevonden: {path}") from None
+        raise ValueError(f"Quick-connect file not found: {path}") from None
     except (OSError, json.JSONDecodeError) as err:
-        raise ValueError(f"Quick-connect-bestand {path} is geen geldige JSON ({type(err).__name__})") from None
+        raise ValueError(f"Quick-connect file {path} is not valid JSON ({type(err).__name__})") from None
     missing = [k for k in QUICK_CONNECT_KEYS if not isinstance(quick_connect, dict) or not quick_connect.get(k)]
     if missing:
-        raise ValueError(f"Quick-connect-bestand {path} mist: {', '.join(missing)}")
+        raise ValueError(f"Quick-connect file {path} is missing: {', '.join(missing)}")
     return quick_connect
 
 
 def connect(quick_connect: dict) -> utils.HdApiClient:
-    """Open een gRPC-kanaal. Dit maakt nog geen verbinding; die komt bij de eerste aanroep."""
+    """Open a gRPC channel. This does not connect yet; that happens on the first call."""
     return utils.create_client(*utils.get_api_params(quick_connect))
 
 
 def fetch_channels(
     client: utils.HdApiClient, channels: dict[str, str], start: datetime, end: datetime, max_points: int
 ) -> pd.DataFrame:
-    """Lees de kanalen {kolomnaam: kanaal-ID} voor het venster als DataFrame met UTC-index.
+    """Read the channels {column name: channel ID} for the window as a DataFrame with a UTC index.
 
-    Rijen met ontbrekende waarden (gaten in de opname) vallen weg: de grafieken kunnen niet met NaN overweg.
+    Rows with missing values (gaps in the recording) are dropped: the charts cannot handle NaN.
     """
     names = list(channels)
     request = pb.GetAggregatedChannelDataRequest(
@@ -105,7 +105,7 @@ def fetch_channels(
     by_id = {c.channel_id: c for c in response.aggregated_channels}
     unknown = [channels[n] for n in names if channels[n] not in by_id]
     if unknown:
-        raise SourceUnavailable(f"ibaHD-server gaf geen data voor {unknown}; wel voor {sorted(by_id)}")
+        raise SourceUnavailable(f"ibaHD-server returned no data for {unknown}; it did for {sorted(by_id)}")
 
     index = from_us(response.timestamps)
     columns = {name: _column(by_id[channels[name]], name, index) for name in names}
@@ -123,21 +123,21 @@ def _column(channel, name: str, index: pd.DatetimeIndex) -> np.ndarray:
         return _digital_on(channel.digital_values, index)
     else:
         raise SourceUnavailable(
-            f"Kanaal {name!r} ({channel.channel_id}) heeft datatype {pb.DataType.Name(kind)}; "
-            "alleen float, double en digitaal worden ondersteund"
+            f"Channel {name!r} ({channel.channel_id}) has data type {pb.DataType.Name(kind)}; "
+            "only float, double and digital are supported"
         )
     if len(values) != len(index):
         raise SourceUnavailable(
-            f"Kanaal {name!r} ({channel.channel_id}) levert {len(values)} gemiddelden voor {len(index)} tijdstippen"
+            f"Channel {name!r} ({channel.channel_id}) returns {len(values)} averages for {len(index)} timestamps"
         )
     return values
 
 
 def _digital_on(digital, index: pd.DatetimeIndex) -> np.ndarray:
-    """Een digitaal kanaal heeft eigen tijdstippen (niet die van de analoge kanalen). Leg de toestand
-    door met 'laatste bekende waarde' op het tijdraster van de rest; vóór de eerste waarde geldt de eerste."""
+    """A digital channel has its own timestamps (not those of the analog channels). Carry the state
+    forward ('last known value') onto the time grid of the rest; before the first value, the first one applies."""
     if len(digital.timestamp) != len(digital.value):
-        raise SourceUnavailable("Digitaal kanaal levert een ongelijk aantal tijdstippen en waarden")
+        raise SourceUnavailable("Digital channel returns an unequal number of timestamps and values")
     states = pd.Series(np.array(digital.value, dtype=float), index=from_us(digital.timestamp))
     states = states[~states.index.duplicated(keep="last")].sort_index()
     both = states.index.union(index)
@@ -148,7 +148,7 @@ def load_signal_map(path: Path) -> dict[str, str]:
     signal_map = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     missing = [s for s in SIGNALS if s not in signal_map or signal_map[s].startswith("<")]
     if missing:
-        raise ValueError(f"Signal map mist channel_id's voor: {missing}")
+        raise ValueError(f"Signal map is missing channel IDs for: {missing}")
     return {s: signal_map[s] for s in SIGNALS}
 
 

@@ -1,11 +1,11 @@
-"""Pakketverlies schatten uit aankomsttijden (zonder telbare hartslag)."""
+"""Estimating packet loss from arrival times (without a countable heartbeat)."""
 
 import numpy as np
 import pytest
 
 from alma.ingest.linkquality import MIN_SAMPLES, estimate_loss_percent
 
-PERIOD = 0.05  # ibaPDA: 20 telegrammen per seconde
+PERIOD = 0.05  # ibaPDA: 20 telegrams per second
 
 
 def stream(count=1200, removed=()):
@@ -18,13 +18,13 @@ def test_a_complete_stream_has_no_loss():
 
 
 def test_missing_packets_inside_the_stream_are_counted():
-    # 8 van de 100 weg, begin en einde blijven: verwacht 100, ontvangen 92
+    # 8 of 100 removed, start and end kept: expected 100, received 92
     assert estimate_loss_percent(stream(100, removed=range(10, 90, 10))) == pytest.approx(8.0)
 
 
 def test_an_outage_counts_as_loss():
     times = stream(1200)  # 60 s
-    outage = (times >= 20) & (times < 30)  # 10 s uitval: Starlink
+    outage = (times >= 20) & (times < 30)  # 10 s outage: Starlink
     assert estimate_loss_percent(times[~outage]) == pytest.approx(100 * 10 / 60, abs=0.5)
 
 

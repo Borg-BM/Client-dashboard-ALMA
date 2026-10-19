@@ -1,8 +1,8 @@
-"""Tests van alma.ingest.format: het formaat van een ibaPDA-UDP-telegram, decode() en encode().
+"""Tests of alma.ingest.format: the format of an ibaPDA UDP telegram, decode() and encode().
 
-De verwachte bytes staan hier als letterlijke waarden (of via int.to_bytes), niet via struct of encode(),
-zodat decode() niet alleen tegen zijn eigen spiegelbeeld wordt gecontroleerd. Alles is deterministisch:
-willekeur komt uit een vaste seed, en er is geen netwerk, klok of echte iba.
+The expected bytes are written out here as literal values (or via int.to_bytes), not via struct or encode(),
+so decode() is not only checked against its own mirror image. Everything is deterministic: randomness comes
+from a fixed seed, and there is no network, clock or real iba.
 """
 
 import copy
@@ -56,7 +56,7 @@ INT_LIMITS = {
     "int32": (-(2**31), 2**31 - 1),
     "int64": (-(2**63), 2**63 - 1),
 }
-# type -> (kleinste en grootste float die nog past, de eerstvolgende die net niet meer past aan beide kanten)
+# type -> (smallest and largest float that still fits, the next one that just no longer fits on either side)
 LIMIT_FLOATS = {
     "uint8": (0.0, 255.0, -1.0, 256.0),
     "int8": (-128.0, 127.0, -129.0, 128.0),
@@ -64,10 +64,10 @@ LIMIT_FLOATS = {
     "int16": (-32768.0, 32767.0, -32769.0, 32768.0),
     "uint32": (0.0, 4294967295.0, -1.0, 4294967296.0),
     "int32": (-2147483648.0, 2147483647.0, -2147483649.0, 2147483648.0),
-    # float(2**63 - 1) is al 2**63; de grootste float eronder ligt 1024 lager, de eerste onder -2**63 ligt 2048 lager
+    # float(2**63 - 1) is already 2**63; the largest float below it is 1024 lower, the first below -2**63 is 2048 lower
     "int64": (-(2.0**63), 2.0**63 - 1024, -(2.0**63) - 2048, 2.0**63),
 }
-# type -> [(waarde, bytes op de draad bij big endian als hex)]. Little endian is dezelfde reeks omgekeerd.
+# type -> [(value, bytes on the wire for big endian as hex)]. Little endian is the same sequence reversed.
 KNOWN = {
     "uint8": [(0, "00"), (1, "01"), (255, "ff")],
     "int8": [(-128, "80"), (-1, "ff"), (0, "00"), (127, "7f")],
@@ -93,7 +93,7 @@ KNOWN = {
 
 
 def wire(hexbytes: str, order: str) -> bytes:
-    """De bytes zoals ze op de draad staan: de big-endian tekst, omgekeerd bij little endian."""
+    """The bytes as they are on the wire: the big-endian text, reversed for little endian."""
     data = bytes.fromhex(hexbytes)
     return data if order == "big" else data[::-1]
 
@@ -105,7 +105,7 @@ def make(byte_order: str, *fields: dict, packet_bytes: int, **extra) -> PacketFo
 
 
 def single(byte_order: str, type_name: str, signal: str = "x", **field_extra) -> PacketFormat:
-    """Een telegram met een enkel signaal op offset 0. type_name mag ook een alias zijn, in elke schrijfwijze."""
+    """A telegram with a single signal at offset 0. type_name may also be an alias, in any spelling."""
     entry = {"signal": signal, "offset": 0, "type": type_name, **field_extra}
     canonical = ALIASES.get(type_name.upper(), type_name.lower())
     return make(byte_order, entry, packet_bytes=SIZES[canonical])
@@ -117,7 +117,7 @@ def format_error(data, **kwargs) -> str:
     return str(caught.value)
 
 
-# ---- types en bytes -------------------------------------------------------------------------------------
+# ---- types and bytes ------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("order", ORDERS)
@@ -161,12 +161,12 @@ def test_an_alias_reads_exactly_like_its_canonical_type():
     ids=ascii,
 )
 def test_other_type_names_are_rejected_and_named(name):
-    # "\u017fint" is een lange s: casefold() zou er "sint" (SINT) van maken, lower() niet
+    # "\u017fint" is a long s: casefold() would turn it into "sint" (SINT), lower() would not
     data = valid()
     data["fields"][1]["type"] = name
     message = format_error(data)
-    assert ascii(name) in message and "level" in message  # de verkeerde naam en het signaal
-    assert "uint32" in message  # en wat wel mag
+    assert ascii(name) in message and "level" in message  # the wrong name and the signal
+    assert "uint32" in message  # and what is allowed
 
 
 @pytest.mark.parametrize("header", [0, 4])
@@ -178,14 +178,14 @@ def test_a_field_must_fit_exactly_up_to_the_end_of_the_packet(type_name, header)
         entry = {"signal": "x", "offset": offset, "type": type_name}
         return {"byte_order": "big", "packet_bytes": header + body, "header_bytes": header, "fields": [entry]}
 
-    PacketFormat.from_dict(build(0, size))  # past precies
+    PacketFormat.from_dict(build(0, size))  # fits exactly
     PacketFormat.from_dict(build(3, size + 3))
-    assert "x" in format_error(build(1, size))  # een byte te ver
+    assert "x" in format_error(build(1, size))  # one byte too far
     if size > 1:
-        assert "x" in format_error(build(0, size - 1))  # een byte te kort
+        assert "x" in format_error(build(0, size - 1))  # one byte too short
 
 
-# ---- decode: lengte en invoer ----------------------------------------------------------------------------
+# ---- decode: length and input ----------------------------------------------------------------------------
 
 
 def test_decode_returns_the_signals_in_field_order_not_offset_order():
@@ -211,7 +211,7 @@ def test_decode_accepts_bytes_bytearray_and_memoryview():
     fmt = single("big", "uint16")
     for packet in (b"\x01\x02", bytearray(b"\x01\x02"), memoryview(b"\x01\x02"), memoryview(bytearray(b"\x01\x02"))):
         assert fmt.decode(packet) == {"x": 258.0}
-    buffer = bytearray(b"\xff\xff\x01\x02\xff")  # recv_into: het telegram is een stuk van een grotere buffer
+    buffer = bytearray(b"\xff\xff\x01\x02\xff")  # recv_into: the telegram is a slice of a larger buffer
     assert fmt.decode(memoryview(buffer)[2:4]) == {"x": 258.0}
 
 
@@ -235,18 +235,18 @@ def test_decode_rejects_memoryviews_it_cannot_read():
     fmt = single("big", "uint16")
     released = memoryview(bytes(2))
     released.release()
-    for view in (released, memoryview(bytes(4))[::2]):  # vrijgegeven, en niet aaneengesloten
+    for view in (released, memoryview(bytes(4))[::2]):  # released, and not contiguous
         with pytest.raises(PacketError):
             fmt.decode(view)
 
 
 def test_decode_turns_every_failure_of_a_strange_object_into_a_packet_error():
     class Hostile:
-        def __buffer__(self, flags):  # vanaf Python 3.12 kan een klasse zelf een buffer leveren
-            raise RuntimeError("geen pakket")
+        def __buffer__(self, flags):  # since Python 3.12 a class can provide a buffer itself
+            raise RuntimeError("not a packet")
 
         def __len__(self):
-            raise RuntimeError("geen pakket")
+            raise RuntimeError("not a packet")
 
     with pytest.raises(PacketError):
         single("big", "uint16").decode(Hostile())
@@ -257,7 +257,7 @@ def test_header_is_ignored_and_offsets_count_from_the_end_of_it():
         fmt = make(order, {"signal": "x", "offset": 0, "type": "uint16"}, packet_bytes=6, header_bytes=4)
         body = wire("0102", order)
         assert fmt.decode(b"\x00\x00\x00\x00" + body) == {"x": 258.0}
-        assert fmt.decode(b"\xde\xad\xbe\xef" + body) == {"x": 258.0}  # wat er in de header staat telt niet
+        assert fmt.decode(b"\xde\xad\xbe\xef" + body) == {"x": 258.0}  # what is in the header does not matter
 
 
 def test_bytes_that_no_field_or_check_covers_are_ignored():
@@ -271,7 +271,7 @@ def test_bytes_that_no_field_or_check_covers_are_ignored():
     assert fmt.decode(bytes([0, 1, 0, 0, 0, 2, 0, 0])) == {"a": 1.0, "b": 2.0}
 
 
-# ---- bitvelden --------------------------------------------------------------------------------------------
+# ---- bit fields -------------------------------------------------------------------------------------------
 
 
 def bit_fields(type_name: str, count: int) -> list[dict]:
@@ -284,7 +284,7 @@ def test_bit_n_is_the_nth_least_significant_bit_of_the_word(type_name, order):
     size = SIZES[type_name]
     fmt = make(order, *bit_fields(type_name, 8 * size), packet_bytes=size)
     for n in range(8 * size):
-        word = (1 << n).to_bytes(size, order)  # het woord in de byte-volgorde van het formaat
+        word = (1 << n).to_bytes(size, order)  # the word in the byte order of the format
         decoded = fmt.decode(word)
         assert [name for name, value in decoded.items() if value == 1.0] == [f"b{n}"]
         assert all(value in (0.0, 1.0) and type(value) is float for value in decoded.values())
@@ -321,7 +321,7 @@ def test_bit_fields_in_one_word_are_or_ed_together_by_encode(order):
     fmt = make(
         order,
         {"signal": "a", "offset": 0, "type": "WORD", "bit": 0},
-        {"signal": "b", "offset": 0, "type": "uint16", "bit": 15},  # alias en canonieke naam zijn hetzelfde type
+        {"signal": "b", "offset": 0, "type": "uint16", "bit": 15},  # alias and canonical name are the same type
         {"signal": "c", "offset": 0, "type": "WORD", "bit": 4},
         {"signal": "d", "offset": 2, "type": "BYTE", "bit": 7},
         packet_bytes=3,
@@ -342,17 +342,17 @@ def test_a_bit_is_set_for_values_above_one_half():
 
 def test_a_bit_field_ignores_the_other_bits_of_its_word_when_decoding():
     fmt = single("big", "uint16", bit=3)
-    assert fmt.decode(b"\xff\xf7") == {"x": 0.0}  # alle andere bits staan aan
+    assert fmt.decode(b"\xff\xf7") == {"x": 0.0}  # all other bits are set
     assert fmt.decode(b"\x00\x08") == {"x": 1.0}
 
 
-# ---- schaal, bias, min en max -----------------------------------------------------------------------------
+# ---- scale, bias, min and max -----------------------------------------------------------------------------
 
-SCALED = [  # type, bytes bij big endian, scale, bias, verwachte waarde
-    ("uint16", "03e8", 0.1, -50.0, 50.0),  # ruw 1000
-    ("int16", "fffb", -2.0, 1.0, 11.0),  # ruw -5
+SCALED = [  # type, bytes for big endian, scale, bias, expected value
+    ("uint16", "03e8", 0.1, -50.0, 50.0),  # raw 1000
+    ("int16", "fffb", -2.0, 1.0, 11.0),  # raw -5
     ("uint8", "ff", 0.5, 0.0, 127.5),
-    ("int32", "fffffff6", 0.001, 100.0, 99.99),  # ruw -10
+    ("int32", "fffffff6", 0.001, 100.0, 99.99),  # raw -10
     ("float32", "40200000", 2.0, 1.0, 6.0),  # 2.5 * 2 + 1
     ("float64", "c000000000000000", 0.5, 0.25, -0.75),  # -2 * 0.5 + 0.25
 ]
@@ -377,8 +377,8 @@ def test_min_and_max_are_inclusive_and_apply_after_scaling():
     def raw(n):
         return n.to_bytes(2, "big", signed=True)
 
-    assert fmt.decode(raw(-1)) == {"level": 9.5}  # precies op de ondergrens
-    assert fmt.decode(raw(20)) == {"level": 20.0}  # precies op de bovengrens
+    assert fmt.decode(raw(-1)) == {"level": 9.5}  # exactly on the lower bound
+    assert fmt.decode(raw(20)) == {"level": 20.0}  # exactly on the upper bound
     for outside in (-2, 21):  # 9.0 en 20.5
         with pytest.raises(PacketError, match="level"):
             fmt.decode(raw(outside))
@@ -406,12 +406,12 @@ def test_a_rejected_range_names_only_its_own_signal_and_not_the_received_value()
         fmt.decode((5).to_bytes(2, "big") + (7777).to_bytes(2, "big"))
     message = str(caught.value)
     assert "tower_y" in message and "tower_x" not in message
-    assert "7777" not in message  # de melding belandt in de logs: geen telegraminhoud
-    assert "10" in message  # wel de grens waar het aan ligt
+    assert "7777" not in message  # the message ends up in the logs: no telegram contents
+    assert "10" in message  # but do name the limit that is the cause
 
 
 NOT_FINITE = {
-    "float32": ["7fc00000", "7f800000", "ff800000"],  # NaN, +oneindig, -oneindig
+    "float32": ["7fc00000", "7f800000", "ff800000"],  # NaN, +infinity, -infinity
     "float64": ["7ff8000000000000", "7ff0000000000000", "fff0000000000000"],
 }
 
@@ -433,7 +433,7 @@ def test_nan_is_rejected_even_when_min_and_max_are_set():
 
 
 def test_a_value_that_overflows_when_scaled_is_rejected():
-    # struct maakt hier de grensgevallen: 1.7e308 * 10 en 3e38 * 1e300 zijn in float64 oneindig
+    # struct builds the edge cases here: 1.7e308 * 10 and 3e38 * 1e300 are infinite in float64
     big = single("big", "float64", signal="vessel_x", scale=10.0)
     with pytest.raises(PacketError, match="vessel_x"):
         big.decode(struct.pack(">d", 1.7e308))
@@ -444,7 +444,7 @@ def test_a_value_that_overflows_when_scaled_is_rejected():
 
 # ---- checks ---------------------------------------------------------------------------------------------
 
-CHECK = 0xBEEF  # 48879: past in een WORD en komt niet toevallig voor als lengte of offset
+CHECK = 0xBEEF  # 48879: fits in a WORD and does not occur by chance as a length or offset
 
 
 def checked(order: str, check_type: str = "WORD", equals: int = CHECK) -> PacketFormat:
@@ -466,7 +466,7 @@ def test_a_wrong_check_word_is_rejected(order):
     other = "little" if order == "big" else "big"
     body = wire("0102", order)
     for wrong in (wire("beef", other), wire("beee", order), wire("0000", order), wire("ffff", order)):
-        with pytest.raises(PacketError, match="controlewoord"):
+        with pytest.raises(PacketError, match="check word"):
             checked(order).decode(wrong + body)
 
 
@@ -477,8 +477,8 @@ def test_the_message_for_a_wrong_check_never_contains_the_expected_value(equals)
     with pytest.raises(PacketError) as caught:
         fmt.decode(received.to_bytes(2, "big") + b"\x01\x02")
     message = str(caught.value).lower()
-    assert str(equals) not in message  # ook niet bij kleine waarden: er staan geen getallen in
-    assert str(received) not in message  # en ook niet wat er wel binnenkwam
+    assert str(equals) not in message  # not even for small values: there are no numbers in it
+    assert str(received) not in message  # and neither is what was actually received
     if equals >= 4096:
         assert format(equals, "x") not in message
 
@@ -500,7 +500,7 @@ def test_check_words_of_every_integer_type_work_at_their_limits(type_name, order
         assert fmt.decode(packet) == {"x": 9.0}
         broken = bytearray(packet)
         broken[0] ^= 0x01
-        with pytest.raises(PacketError, match="controlewoord"):
+        with pytest.raises(PacketError, match="check word"):
             fmt.decode(bytes(broken))
 
 
@@ -520,7 +520,7 @@ def test_every_check_must_match_not_just_the_first():
     )
     assert fmt.decode(b"\x12\x34\x56\x78\x01") == {"x": 1.0}
     for broken in (b"\x12\x35\x56\x78\x01", b"\x12\x34\x56\x79\x01"):
-        with pytest.raises(PacketError, match="controlewoord"):
+        with pytest.raises(PacketError, match="check word"):
             fmt.decode(broken)
 
 
@@ -531,14 +531,14 @@ def test_a_wrong_check_is_reported_before_the_values_are_looked_at():
         packet_bytes=6,
         checks=[{"offset": 0, "type": "WORD", "equals": CHECK}],
     )
-    with pytest.raises(PacketError, match="controlewoord"):
-        fmt.decode(b"\x00\x00\x7f\xc0\x00\x00")  # verkeerd controlewoord en een NaN
+    with pytest.raises(PacketError, match="check word"):
+        fmt.decode(b"\x00\x00\x7f\xc0\x00\x00")  # wrong check word and a NaN
 
 
 def test_repr_never_shows_a_check_value():
     fmt = checked("big")
     assert "48879" not in repr(fmt) and "48879" not in repr(fmt.checks[0])
-    assert fmt.checks[0].equals == CHECK  # maar de waarde zelf is gewoon bereikbaar
+    assert fmt.checks[0].equals == CHECK  # but the value itself is simply reachable
 
 
 # ---- encode -------------------------------------------------------------------------------------------
@@ -592,8 +592,8 @@ def test_encode_names_missing_and_unknown_signals():
     with pytest.raises(ValueError, match="colour") as unknown:
         fmt.encode({"tower_x": 1.0, "tower_y": 2.0, "colour": 3.0})
     for caught in (missing, unknown):
-        assert type(caught.value) is ValueError  # geen FormatError of PacketError: dat zijn andere fouten
-    assert "ontbreekt" in str(missing.value) and "onbekend" in str(unknown.value)
+        assert type(caught.value) is ValueError  # not a FormatError or PacketError: those are other errors
+    assert "missing" in str(missing.value) and "unknown" in str(unknown.value)
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf], ids=["nan", "inf", "-inf"])
@@ -630,7 +630,7 @@ def test_encode_rounds_to_the_nearest_integer_before_checking_the_range():
 def test_encode_checks_the_range_after_scale_and_bias_are_undone():
     fmt = single("big", "uint8", signal="level", scale=0.5, bias=10.0)
     assert fmt.encode({"level": 137.5}) == b"\xff"  # (137.5 - 10) / 0.5 = 255
-    for value in (138.0, 9.0):  # 256 en -2
+    for value in (138.0, 9.0):  # 256 and -2
         with pytest.raises(ValueError, match="level"):
             fmt.encode({"level": value})
 
@@ -638,19 +638,19 @@ def test_encode_checks_the_range_after_scale_and_bias_are_undone():
 def test_encode_refuses_a_float32_overflow_but_not_float32_extremes():
     fmt = single("big", "float32", signal="level")
     assert fmt.decode(fmt.encode({"level": 3.4e38}))["level"] == pytest.approx(3.4e38, rel=1e-7)
-    for value in (1e39, -1e39, 3.4028235677973366e38):  # de laatste rondt in float32 af naar oneindig
+    for value in (1e39, -1e39, 3.4028235677973366e38):  # the last one rounds to infinity in float32
         with pytest.raises(ValueError, match="level") as caught:
             fmt.encode({"level": value})
         assert "float32" in str(caught.value)
     scaled = single("big", "float32", signal="level", scale=0.01)
     with pytest.raises(ValueError, match="level"):
-        scaled.encode({"level": 1e38})  # past zelf wel, maar de ruwe waarde (1e40) niet
+        scaled.encode({"level": 1e38})  # fits itself, but the raw value (1e40) does not
 
 
 def test_encode_refuses_a_float64_that_overflows_after_unscaling():
     fmt = single("big", "float64", signal="level", scale=0.5)
     with pytest.raises(ValueError, match="level"):
-        fmt.encode({"level": 1.7976931348623157e308})  # ruw is 3.6e308
+        fmt.encode({"level": 1.7976931348623157e308})  # raw is 3.6e308
 
 
 @pytest.mark.parametrize("junk", [None, "1.5", b"1", [1.0], 1j, object(), {}], ids=lambda junk: type(junk).__name__)
@@ -689,13 +689,13 @@ def test_encode_works_with_the_signals_in_any_order():
     assert fmt.encode({"b": 2, "a": 1}) == b"\x01\x02"
 
 
-# ---- heen en terug ---------------------------------------------------------------------------------------
+# ---- there and back --------------------------------------------------------------------------------------
 
 SCALINGS = [(1.0, 0.0), (0.1, 0.0), (0.01, -100.0), (-0.5, 3.0)]
 
 
 def raw_limits(type_name: str) -> tuple[int, int]:
-    """Het bereik waarin we ruwe waarden trekken; bij int64 ruim binnen wat een float exact vasthoudt."""
+    """The range from which we draw raw values; for int64 well within what a float holds exactly."""
     return (-(2**40), 2**40) if type_name == "int64" else INT_LIMITS[type_name]
 
 
@@ -708,12 +708,12 @@ def test_integer_types_round_trip_within_half_a_step(type_name, order, scale, bi
     low, high = raw_limits(type_name)
     ends = sorted((low * scale + bias, high * scale + bias))
     values = [*ends, *(rng.uniform(*ends) for _ in range(60))]
-    values += [rng.randint(low, high) * scale + bias for _ in range(20)]  # precies op het raster
+    values += [rng.randint(low, high) * scale + bias for _ in range(20)]  # exactly on the grid
     for value in values:
         packet = fmt.encode({"x": value})
         decoded = fmt.decode(packet)["x"]
         assert abs(decoded - value) <= abs(scale) / 2 + 4 * math.ulp(max(abs(value), 1.0))
-        assert fmt.encode({"x": decoded}) == packet  # en nog eens: dezelfde bytes
+        assert fmt.encode({"x": decoded}) == packet  # and once more: the same bytes
 
 
 @pytest.mark.parametrize("order", ORDERS)
@@ -750,7 +750,7 @@ def test_float_types_with_scale_and_bias_round_trip_approximately(type_name, sca
         value = rng.uniform(-1000, 1000)
         packet = fmt.encode({"x": value})
         decoded = fmt.decode(packet)["x"]
-        if type_name == "float32":  # de afronding zit in de ruwe waarde, die door de bias groter is dan de uitkomst
+        if type_name == "float32":  # rounding happens in the raw value, which the bias makes larger than the result
             assert abs(decoded - value) <= abs(value - bias) * 2**-24 + 2 * math.ulp(value)
             assert fmt.encode({"x": decoded}) == packet
         else:
@@ -771,7 +771,7 @@ ALMA_VALUES = {
 
 
 def alma_definition(order: str) -> dict:
-    """Een telegram zoals het er op de BM010 uit kan zien: header, gemengde types, een bit en een controlewoord."""
+    """A telegram as it could look on the BM010: header, mixed types, a bit and a check word."""
     return {
         "byte_order": order,
         "packet_bytes": 52,
@@ -795,7 +795,7 @@ def alma_definition(order: str) -> dict:
 @pytest.mark.parametrize("order", ORDERS)
 def test_a_realistic_telegram_has_the_documented_layout_and_round_trips(order):
     fmt = PacketFormat.from_dict(alma_definition(order), required_signals=SIGNALS)
-    # De indeling met de hand uitgeschreven: 4 header, DWORD, FLOAT, INT, 2 leeg, FLOAT, DINT, DOUBLE, DINT, FLOAT,
+    # The layout written out by hand: 4 header, DWORD, FLOAT, INT, 2 empty, FLOAT, DINT, DOUBLE, DINT, FLOAT,
     # LINT, DWORD
     prefix = ">" if order == "big" else "<"
     expected = struct.pack(
@@ -809,11 +809,11 @@ def test_a_realistic_telegram_has_the_documented_layout_and_round_trips(order):
     assert fmt.encode(decoded) == packet
 
 
-# ---- een ongeldig formaat ----------------------------------------------------------------------------
+# ---- an invalid format -------------------------------------------------------------------------------
 
 
 def valid() -> dict:
-    """Een geldig formaat met een bitveld, een geschaald float-signaal, een DINT, een check en ruimte over."""
+    """A valid format with a bit field, a scaled float signal, a DINT, a check and room to spare."""
     return {
         "byte_order": "big",
         "packet_bytes": 20,
@@ -879,7 +879,7 @@ def chain(*edits):
 
 
 def family(edit_for, key, values, *fragments):
-    """Een case per ongeldige waarde; de id is de sleutel met de (ingekorte) waarde."""
+    """One case per invalid value; the id is the key with the (shortened) value."""
     return [pytest.param(edit_for(value), fragments, id=f"{key}={value!r}"[:40]) for value in values]
 
 
@@ -892,7 +892,7 @@ def bad(edit, *fragments, id):
 
 
 def check_values_outside(type_name, values, limit_type):
-    """Check-waarden die niet in het type van de check passen."""
+    """Check values that do not fit in the type of the check."""
 
     def edit_for(value):
         return check_entry(0, type=type_name, equals=value)
@@ -901,7 +901,7 @@ def check_values_outside(type_name, values, limit_type):
 
 
 INVALID = [
-    # het bovenste niveau
+    # the top level
     bad(top(colour=1), "colour", id="unknown key at the top"),
     bad(without("byte_order"), "byte_order", id="byte_order missing"),
     *family(
@@ -932,7 +932,7 @@ INVALID = [
         "source",
     ),
     bad(top(timestamp={"source": "receive", "extra": 1}), "timestamp", "extra", id="unknown key in timestamp"),
-    # velden
+    # fields
     *family(lambda v: replace(("fields", 1), v), "fields[1]", [5, "level", None, [], True], "fields[1]"),
     bad(entry(1, colour="red"), "fields[1]", "level", "colour", id="unknown key in a field"),
     bad(entry(0, colour="red"), "fields[0]", "flag", "colour", id="unknown key in a bit field"),
@@ -953,17 +953,17 @@ INVALID = [
     bad(entry(1, offset=15), "fields[1]", "level", id="field one byte beyond the packet"),
     bad(entry(2, offset=15), "fields[2]", "count", id="dint beyond the packet"),
     bad(entry(1, offset=10**30), "fields[1]", "level", id="absurd offset"),
-    # bitvelden
+    # bit fields
     bad(entry(1, bit=1), "fields[1]", "level", "bit", id="bit on a float"),
     bad(entry(1, type="DOUBLE", bit=1), "fields[1]", "level", "bit", id="bit on a double"),
-    bad(add_field(signal="fbit", offset=12, type="FLOAT", bit=1), "fbit", "geheel type", id="bit on a bare float"),
-    bad(add_field(signal="dbit", offset=12, type="float64", bit=0), "dbit", "geheel type", id="bit on a bare double"),
+    bad(add_field(signal="fbit", offset=12, type="FLOAT", bit=1), "fbit", "integer type", id="bit on a bare float"),
+    bad(add_field(signal="dbit", offset=12, type="float64", bit=0), "dbit", "integer type", id="bit on a bare double"),
     *family(lambda v: entry(0, bit=v), "bit", [-1, 16, 100, 1.0, "3", True, None, []], "fields[0]", "flag", "bit"),
     bad(entry(0, type="BYTE", bit=8), "flag", "bit", id="bit 8 of a byte"),
     bad(entry(0, type="DWORD", bit=32), "flag", "bit", id="bit 32 of a dword"),
     bad(entry(0, type="LINT", bit=64), "flag", "bit", id="bit 64 of a lint"),
     *[bad(entry(0, **{key: 1}), "flag", key, id=f"bit field with {key}") for key in ("scale", "bias", "min", "max")],
-    # schaal, bias, min en max
+    # scale, bias, min and max
     *family(lambda v: entry(1, scale=v), "scale", [*NOT_A_NUMBER, 0, 0.0], "fields[1]", "level", "scale"),
     *family(lambda v: entry(1, bias=v), "bias", NOT_A_NUMBER, "fields[1]", "level", "bias"),
     *family(lambda v: entry(1, min=v), "min", NOT_A_NUMBER, "fields[1]", "level", "min"),
@@ -1003,7 +1003,7 @@ INVALID = [
         "check type",
         ["FLOAT", "DOUBLE", "float32", "float64"],
         "checks[0]",
-        "gehele",
+        "integer",
     ),
     bad(check_entry(0, offset=17), "checks[0]", id="check one byte beyond the packet"),
     *family(
@@ -1026,7 +1026,7 @@ INVALID = [
 
 
 def distinctive_check_values(data) -> list[int]:
-    """De check-waarden in de (vervormde) definitie die onmiskenbaar genoeg zijn om als tekst terug te zoeken."""
+    """The check values in the (distorted) definition that are distinctive enough to search for as text."""
     checks = data.get("checks")
     found = []
     for check in checks if isinstance(checks, list) else []:
@@ -1043,7 +1043,7 @@ def test_an_invalid_format_is_rejected_naming_the_signal_key_or_index(edit, frag
     message = format_error(data)
     for fragment in fragments:
         assert fragment in message, message
-    for value in distinctive_check_values(data):  # de verwachte waarde van een check lekt nooit, ook niet als hex
+    for value in distinctive_check_values(data):  # the expected value of a check never leaks, not even as hex
         assert str(value) not in message and format(value, "x") not in message.lower(), message
 
 
@@ -1054,7 +1054,7 @@ def test_the_base_definition_used_for_the_invalid_cases_is_itself_valid():
 
 @pytest.mark.parametrize("data", [[], [valid()], "text", None, 42, 1.5, True], ids=lambda data: type(data).__name__)
 def test_the_top_level_must_be_a_json_object(data):
-    assert "JSON-object" in format_error(data)
+    assert "JSON object" in format_error(data)
 
 
 @pytest.mark.parametrize("value", [-(2**63), -1, 256, 2**63])
@@ -1069,17 +1069,17 @@ def test_a_rejected_check_value_is_never_echoed(value):
 def test_packet_bytes_outside_the_udp_range_is_refused_with_the_range_in_the_message(packet_bytes):
     data = valid()
     data["packet_bytes"] = packet_bytes
-    assert "1 tot en met 65507" in format_error(data)
+    assert "1 to 65507" in format_error(data)
 
 
 def test_messages_stay_ascii_for_names_with_other_characters():
     data = valid()
     data["fields"][1].update(signal="druk\xe9\u4e2d", colour="x")
     data["caf\xe9"] = 1
-    assert format_error(data).isascii() and "caf\\xe9" in format_error(data)  # de onbekende sleutel
+    assert format_error(data).isascii() and "caf\\xe9" in format_error(data)  # the unknown key
     del data["caf\xe9"]
     message = format_error(data)
-    assert message.isascii() and "druk\\xe9\\u4e2d" in message  # het signaal waar de fout in zit
+    assert message.isascii() and "druk\\xe9\\u4e2d" in message  # the signal the error is in
 
     fmt = single("big", "int8", signal="druk\xe9", max=0)
     with pytest.raises(PacketError) as decode_error:
@@ -1130,7 +1130,7 @@ VALID_VARIANTS = [
     pytest.param(entry(1, scale=2, bias=1, min=-5, max=5), id="integers for scale, bias, min and max"),
     pytest.param(entry(1, scale=1e-300), id="tiny scale"),
     pytest.param(entry(1, scale=1e300), id="huge scale"),
-    pytest.param(entry(1, signal="Druk bore [bar]"), id="any non-empty text as signal name"),
+    pytest.param(entry(1, signal="Pressure bore [bar]"), id="any non-empty text as signal name"),
     pytest.param(lambda data: data["fields"].reverse(), id="fields not in offset order"),
     pytest.param(add_check(offset=12, type="WORD", equals=1), id="a second check right behind the first"),
     pytest.param(
@@ -1159,7 +1159,7 @@ def test_a_one_byte_telegram_and_a_header_that_leaves_one_byte_work():
     assert fmt.decode(bytes(MAX_PACKET_BYTES - 1) + b"\x07") == {"x": 7.0}
 
 
-# ---- wat from_dict teruggeeft ------------------------------------------------------------------------
+# ---- what from_dict returns --------------------------------------------------------------------------
 
 
 def test_from_dict_exposes_the_definition():
@@ -1178,19 +1178,19 @@ def test_from_dict_exposes_the_definition():
 def test_optional_parts_get_their_defaults():
     fmt = single("little", "BYTE")
     assert (fmt.header_bytes, fmt.checks) == (0, ())
-    assert fmt.fields == (Field("x", 0, "uint8"),)  # bit, min en max zijn None; scale 1 en bias 0
+    assert fmt.fields == (Field("x", 0, "uint8"),)  # bit, min and max are None; scale 1 and bias 0
 
 
 def test_a_format_built_directly_gets_the_same_layout_checks():
     word = Field("x", 0, "uint16")
-    assert PacketFormat("big", 2, 0, [word]).fields == (word,)  # een lijst wordt een tuple
+    assert PacketFormat("big", 2, 0, [word]).fields == (word,)  # a list becomes a tuple
     for args, message in [
         (("middle", 2, 0, (word,)), "byte_order"),
         (("big", 2, 0, ()), "fields"),
-        (("big", 3, 0, (word, Field("y", 1, "uint16"))), "overlapt"),
-        (("big", 2, 0, (word, Field("x", 0, "uint16"))), "komt al voor"),
-        (("big", 2, 0, (Field("y", 1, "uint16"),)), "passen niet"),
-        (("big", 2, 0, (word,), (Check(0, "uint16", 1),)), "overlapt"),
+        (("big", 3, 0, (word, Field("y", 1, "uint16"))), "overlaps"),
+        (("big", 2, 0, (word, Field("x", 0, "uint16"))), "already occurs"),
+        (("big", 2, 0, (Field("y", 1, "uint16"),)), "do not fit"),
+        (("big", 2, 0, (word,), (Check(0, "uint16", 1),)), "overlaps"),
     ]:
         with pytest.raises(FormatError, match=message):
             PacketFormat(*args)
@@ -1261,20 +1261,20 @@ def test_required_signals_must_equal_the_signals_in_fields_in_any_order_and_cont
 
 def test_required_signals_lists_the_missing_and_the_unknown_signals():
     message = format_error(valid(), required_signals=["flag", "level", "pressure_bore", "pressure_rod"])
-    assert "ontbrekend: pressure_bore, pressure_rod" in message
-    assert "onbekend: count" in message
-    assert "flag" not in message and "level" not in message  # wat wel klopt wordt niet genoemd
+    assert "missing: pressure_bore, pressure_rod" in message
+    assert "unknown: count" in message
+    assert "flag" not in message and "level" not in message  # what does match is not mentioned
 
 
 def test_required_signals_with_only_missing_or_only_unknown_ones():
     only_missing = format_error(valid(), required_signals=["flag", "level", "count", "tower_x"])
-    assert "ontbrekend: tower_x" in only_missing and "onbekend" not in only_missing
+    assert "missing: tower_x" in only_missing and "unknown" not in only_missing
     only_unknown = format_error(valid(), required_signals=["flag", "level"])
-    assert "onbekend: count" in only_unknown and "ontbrekend" not in only_unknown
+    assert "unknown: count" in only_unknown and "missing" not in only_unknown
 
 
 def test_an_empty_required_set_makes_every_signal_unknown():
-    assert "onbekend: count, flag, level" in format_error(valid(), required_signals=[])
+    assert "unknown: count, flag, level" in format_error(valid(), required_signals=[])
 
 
 def test_without_required_signals_any_signal_names_are_fine():
@@ -1284,11 +1284,11 @@ def test_without_required_signals_any_signal_names_are_fine():
 def test_required_signals_for_the_alma_signals():
     assert PacketFormat.from_dict(alma_definition("big"), required_signals=SIGNALS).signals == tuple(SIGNALS)
     data = alma_definition("big")
-    data["fields"][1]["signal"] = "pressure_bore_skid"  # een typefout
+    data["fields"][1]["signal"] = "pressure_bore_skid"  # a typo
     message = format_error(data, required_signals=SIGNALS)
-    assert "ontbrekend: pressure_bore_skid1" in message and "onbekend: pressure_bore_skid" in message
+    assert "missing: pressure_bore_skid1" in message and "unknown: pressure_bore_skid" in message
     del data["fields"][1]
-    assert "ontbrekend: pressure_bore_skid1" in format_error(data, required_signals=SIGNALS)
+    assert "missing: pressure_bore_skid1" in format_error(data, required_signals=SIGNALS)
 
 
 # ---- load ------------------------------------------------------------------------------------------------
@@ -1298,11 +1298,11 @@ def test_load_reads_a_json_file_with_or_without_a_bom(tmp_path):
     text = json.dumps(valid())
     plain, with_bom = tmp_path / "plain.json", tmp_path / "bom.json"
     plain.write_text(text, encoding="utf-8")
-    with_bom.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))  # Kladblok zet er een BOM voor
+    with_bom.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))  # Notepad puts a BOM in front
     expected = PacketFormat.from_dict(valid())
     assert PacketFormat.load(plain) == expected
     assert PacketFormat.load(with_bom) == expected
-    assert PacketFormat.load(str(plain)) == expected  # ook een gewone tekst als pad
+    assert PacketFormat.load(str(plain)) == expected  # a plain string as path works too
 
 
 def test_load_passes_required_signals_on(tmp_path):
@@ -1327,19 +1327,19 @@ def test_load_reports_a_directory_by_its_path(tmp_path):
 
 
 def test_load_reports_a_path_the_operating_system_refuses(tmp_path):
-    with pytest.raises(FormatError, match="niet te lezen"):
-        PacketFormat.load(str(tmp_path / "format\0.json"))  # een NUL in het pad is een ValueError, geen OSError
+    with pytest.raises(FormatError, match="cannot be read"):
+        PacketFormat.load(str(tmp_path / "format\0.json"))  # a NUL in the path is a ValueError, not an OSError
 
 
 @pytest.mark.parametrize(
     "content",
     [
-        b'{"ApiKey": "geheim-123", oops',
+        b'{"ApiKey": "secret-123", oops',
         b"",
         b"   \n",
-        b"not json at all geheim-123",
-        b'{"a": 1} geheim-123',
-        b"[" * 100_000,  # absurde nesting
+        b"not json at all secret-123",
+        b'{"a": 1} secret-123',
+        b"[" * 100_000,  # absurd nesting
     ],
     ids=["truncated", "empty", "blank", "text", "trailing data", "deep nesting"],
 )
@@ -1350,7 +1350,7 @@ def test_load_reports_invalid_json_by_its_path_without_echoing_the_contents(tmp_
         PacketFormat.load(path)
     message = str(caught.value)
     assert str(path) in message and "JSON" in message
-    assert "geheim-123" not in message and "oops" not in message
+    assert "secret-123" not in message and "oops" not in message
 
 
 def test_load_reports_a_number_of_thousands_of_digits_as_a_format_error(tmp_path):
@@ -1363,7 +1363,7 @@ def test_load_reports_a_number_of_thousands_of_digits_as_a_format_error(tmp_path
 
 def test_load_reports_a_file_that_is_not_utf8(tmp_path):
     path = tmp_path / "format.json"
-    path.write_bytes(json.dumps(valid()).encode("utf-16"))  # "Unicode" in Kladblok
+    path.write_bytes(json.dumps(valid()).encode("utf-16"))  # "Unicode" in Notepad
     with pytest.raises(FormatError, match="UTF-8") as caught:
         PacketFormat.load(path)
     assert str(path) in str(caught.value)
@@ -1380,14 +1380,14 @@ def test_load_names_the_file_when_the_format_itself_is_wrong(tmp_path):
 
 
 def test_load_reports_a_wrong_file_by_key_name_without_echoing_its_values(tmp_path):
-    path = tmp_path / "quick_connect.json"  # per ongeluk het verkeerde bestand
-    secrets = {"Host": "ibahd.example", "Port": 61937, "ApiKey": "geheim-123", "TlsServerCertificate": "pem-data"}
+    path = tmp_path / "quick_connect.json"  # the wrong file by accident
+    secrets = {"Host": "ibahd.example", "Port": 61937, "ApiKey": "secret-123", "TlsServerCertificate": "pem-data"}
     path.write_text(json.dumps(secrets), encoding="utf-8")
     with pytest.raises(FormatError) as caught:
         PacketFormat.load(path)
     message = str(caught.value)
     assert "Host" in message
-    assert all(secret not in message for secret in ("ibahd.example", "61937", "geheim-123", "pem-data"))
+    assert all(secret not in message for secret in ("ibahd.example", "61937", "secret-123", "pem-data"))
 
 
 def test_load_refuses_a_key_that_occurs_twice(tmp_path):
@@ -1397,7 +1397,7 @@ def test_load_refuses_a_key_that_occurs_twice(tmp_path):
         ' "fields": [{"signal": "x", "offset": 0, "type": "WORD"}]}',
         encoding="utf-8",
     )
-    with pytest.raises(FormatError, match="byte_order") as caught:  # stil de laatste houden draait de byte-volgorde om
+    with pytest.raises(FormatError, match="byte_order") as caught:  # silently keeping the last one flips the byte order
         PacketFormat.load(path)
     assert str(path) in str(caught.value)
 
@@ -1415,11 +1415,11 @@ def test_load_refuses_numbers_that_python_reads_from_json_but_are_not_finite(tmp
         PacketFormat.load(path)
 
 
-# ---- decode kan niet worden gecrasht --------------------------------------------------------------------
+# ---- decode cannot be crashed ---------------------------------------------------------------------------
 
 
 def every_type_format(order: str) -> PacketFormat:
-    """Alle typen, schaal, grenzen en bitvelden door elkaar, zodat een willekeurig telegram op veel manieren afvalt."""
+    """All types, scale, bounds and bit fields mixed together, so a random telegram can fail in many ways."""
     fields = [
         {"signal": "a", "offset": 0, "type": "uint8"},
         {"signal": "b", "offset": 1, "type": "int8", "scale": -2.0, "bias": 5.0},
@@ -1435,7 +1435,7 @@ def every_type_format(order: str) -> PacketFormat:
         {"signal": "bit_c", "offset": 36, "type": "DWORD", "bit": 31},
         {"signal": "bit_d", "offset": 40, "type": "BYTE", "bit": 7},
     ]
-    # 3 byte header, 41 bytes met velden en 1 leeg byte aan het eind
+    # 3 byte header, 41 bytes with fields and 1 empty byte at the end
     return make(order, *fields, packet_bytes=3 + 41 + 1, header_bytes=3)
 
 
@@ -1453,7 +1453,7 @@ def test_decode_of_random_bytes_gives_a_result_or_a_packet_error_and_nothing_els
         accepted += 1
         assert list(result) == list(fmt.signals)
         assert all(type(v) is float and math.isfinite(v) for v in result.values())
-    assert accepted > 100 and rejected > 100  # beide uitkomsten zijn echt geraakt
+    assert accepted > 100 and rejected > 100  # both outcomes were really hit
 
 
 @pytest.mark.parametrize("order", ORDERS)
@@ -1468,7 +1468,7 @@ def test_decode_of_every_wrong_length_is_a_packet_error(order):
 
 
 def layout_format(order: str) -> PacketFormat:
-    """2 bytes header, dan: check (2), count, leeg, level (2), flag (alleen bit 7), leeg, depth (4)."""
+    """2 bytes header, then: check (2), count, empty, level (2), flag (only bit 7), empty, depth (4)."""
     return PacketFormat.from_dict(
         {
             "byte_order": order,
@@ -1491,8 +1491,8 @@ def test_changing_any_single_byte_of_a_valid_telegram_is_handled_as_documented(o
     good = fmt.encode({"count": 7, "level": 12.5, "flag": 1, "depth": 1.25})
     original = fmt.decode(good)
     assert original == {"count": 7.0, "level": 12.5, "flag": 1.0, "depth": 1.25}
-    unused = {0, 1, 5, 9}  # de header en de twee lege bytes
-    check_bytes, flag_byte = {2, 3}, 8  # het controlewoord, en het byte waarvan alleen bit 7 telt
+    unused = {0, 1, 5, 9}  # the header and the two empty bytes
+    check_bytes, flag_byte = {2, 3}, 8  # the check word, and the byte of which only bit 7 counts
     for position in range(len(good)):
         for new in range(256):
             changed = bytearray(good)
@@ -1504,10 +1504,10 @@ def test_changing_any_single_byte_of_a_valid_telegram_is_handled_as_documented(o
                 continue
             assert list(result) == list(fmt.signals)
             if position in unused:
-                assert result == original  # wat nergens in zit, doet niets
+                assert result == original  # what is not part of anything does nothing
             if position in check_bytes:
-                assert new == good[position]  # een ander controlewoord komt er nooit door
-            if position == flag_byte:  # alleen bit 7 telt
+                assert new == good[position]  # a different check word never gets through
+            if position == flag_byte:  # only bit 7 counts
                 assert result == {**original, "flag": float(new & 0x80 != 0)}
 
 
@@ -1525,9 +1525,9 @@ def test_decode_does_not_compile_or_parse_anything_per_telegram(monkeypatch):
     good = fmt.encode({"count": 7, "level": 12.5, "flag": 1, "depth": 1.25})
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("decode() mag dit niet voor elk telegram doen")
+        raise AssertionError("decode() must not do this for every telegram")
 
-    with monkeypatch.context() as patch:  # struct-formaten, JSON en reguliere expressies horen bij het laden
+    with monkeypatch.context() as patch:  # struct formats, JSON and regular expressions belong to loading
         for module, name in [
             (struct, "Struct"),
             (struct, "unpack"),
@@ -1546,16 +1546,16 @@ def test_decode_does_not_compile_or_parse_anything_per_telegram(monkeypatch):
             except PacketError:
                 pass
             else:
-                raise AssertionError("dit telegram had geweigerd moeten worden")
+                raise AssertionError("this telegram should have been rejected")
 
 
-# ---- from_dict kan niet worden gecrasht -------------------------------------------------------------------
+# ---- from_dict cannot be crashed --------------------------------------------------------------------------
 
 JUNK = [
-    *(None, True, False, 0, -1, 1, 2, 7, 15, 16, 255, 2**31, 2**70, -(2**70), 10**400),  # getallen
+    *(None, True, False, 0, -1, 1, 2, 7, 15, 16, 255, 2**31, 2**70, -(2**70), 10**400),  # numbers
     *(0.0, -0.0, 1.5, 1e308, math.nan, math.inf, -math.inf),
-    *("", "x", "big", "little", "WORD", "float", "receive"),  # tekst
-    *([], {}, [1], ["a"], {"a": 1}, {"source": "receive"}, (1, 2), b"bytes"),  # samengesteld
+    *("", "x", "big", "little", "WORD", "float", "receive"),  # text
+    *([], {}, [1], ["a"], {"a": 1}, {"source": "receive"}, (1, 2), b"bytes"),  # compound
 ]
 
 
@@ -1576,7 +1576,7 @@ def at(node, path):
 
 
 def vandalise(rng: random.Random, data: dict) -> None:
-    """Een paar willekeurige ingrepen: een waarde vervangen, een sleutel weghalen of toevoegen, iets invoegen."""
+    """A few random interventions: replace a value, remove or add a key, insert something."""
     for _ in range(rng.choice([1, 1, 2, 3])):
         path = rng.choice([p for p in paths(data) if p])
         parent = at(data, path[:-1])
@@ -1604,7 +1604,7 @@ def test_from_dict_of_vandalised_definitions_gives_a_usable_format_or_a_format_e
             refused += 1
             continue
         usable += 1
-        try:  # een formaat dat het laden overleeft moet ook werken
+        try:  # a format that survives loading must also work
             fmt.decode(bytes(fmt.packet_bytes))
         except PacketError:
             pass

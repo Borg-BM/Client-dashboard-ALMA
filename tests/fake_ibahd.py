@@ -1,10 +1,10 @@
-"""Een nagebootste ibaHD-server voor tests: echte gRPC over TLS (zelfondertekend certificaat) met
-API-key-controle, zodat de client zijn echte code doorloopt (certificaat, metadata, protobuf).
+"""A simulated ibaHD server for tests: real gRPC over TLS (self-signed certificate) with
+API key checking, so the client runs through its real code (certificate, metadata, protobuf).
 
-Let op wat dit wél en niet bewijst: de server spreekt de conventies zoals wij ze uit de iba-documentatie
-begrijpen (tijden in microseconden sinds 1970, kanaal-ID "<store>\\<kanaal>"). Het bewijst dat onze
-client daarmee consistent is, niet dat een echte ibaHD-server ze zo hanteert; daarvoor is
-`python -m alma.ibahd_check` tegen de echte server.
+Note what this does and does not prove: the server follows the conventions as we understand them from the
+iba documentation (times in microseconds since 1970, channel ID "<store>\\<channel>"). It proves that our
+client is consistent with them, not that a real ibaHD server uses them that way; for that there is
+`python -m alma.ibahd_check` against the real server.
 """
 
 import datetime
@@ -25,7 +25,7 @@ API_KEY = "test-api-key-0123456789"
 STORE = "bm010"
 SAMPLE_PERIOD_US = 100_000  # 10 Hz
 HISTORY_S = 3600
-TOGGLE_US = 5_000_000  # de digitale toestand wisselt elke 5 s
+TOGGLE_US = 5_000_000  # the digital state toggles every 5 s
 
 FLOAT, DOUBLE, DIGITAL, STRING = (
     pb.DATA_TYPE_FLOAT_VALUES,
@@ -34,7 +34,7 @@ FLOAT, DOUBLE, DIGITAL, STRING = (
     pb.DATA_TYPE_STRING_VALUES,
 )
 
-# logische naam -> (kanaal binnen de store, naam, eenheid, datatype)
+# logical name -> (channel within the store, name, unit, data type)
 CHANNELS = {
     "tower_x": ("[0:0]", "Tower X", "mm", FLOAT),
     "tower_y": ("[0:1]", "Tower Y", "mm", DOUBLE),
@@ -45,7 +45,7 @@ CHANNELS = {
     "vessel_x": ("[2:0]", "Vessel X", "mm", FLOAT),
     "vessel_y": ("[2:1]", "Vessel Y", "mm", FLOAT),
     "system_mode": ("[3:0]", "System mode", "", DOUBLE),
-    # Geen onderdeel van SIGNALS: houdt het digitale pad van de client onder test (eigen tijdstippen per kanaal)
+    # Not part of SIGNALS: keeps the client's digital path under test (own timestamps per channel)
     "pump_running": ("[3:1]", "Pump running", "", DIGITAL),
 }
 TEXT_CHANNEL = ("[9:0]", "Operator note", "", STRING)
@@ -56,7 +56,7 @@ def full_id(name: str) -> str:
 
 
 def analog_value(name: str, t_us) -> np.ndarray:
-    """De 'opgenomen' waarde van een analoog kanaal; deterministisch, zodat tests hem kunnen narekenen."""
+    """The 'recorded' value of an analog channel; deterministic, so tests can recompute it."""
     seed = sum(map(ord, name)) % 7 + 1
     return 10 * seed + 5 * np.sin(2 * np.pi * 0.3 * np.asarray(t_us) / 1e6 + seed)
 
@@ -66,7 +66,7 @@ def digital_state(t_us) -> np.ndarray:
 
 
 def make_certificate(names: tuple[str, ...]) -> tuple[bytes, bytes]:
-    """Zelfondertekend certificaat voor de opgegeven DNS-namen/IP-adressen: (cert_pem, key_pem)."""
+    """Self-signed certificate for the given DNS names/IP addresses: (cert_pem, key_pem)."""
     key = ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fake-ibahd")])
     alt_names = []
@@ -112,13 +112,13 @@ class _ApiKeyInterceptor(grpc.ServerInterceptor):
 
 
 class FakeIbaHd:
-    """Start een server op een vrije poort. `quick_connect` is wat ibaHD Manager zou exporteren.
+    """Start a server on a free port. `quick_connect` is what ibaHD Manager would export.
 
-    newest_age_s: hoe oud de nieuwste meting is (0 = live).
-    schema_ids: "full" geeft kanaal-ID's als "<store>\\[0:0]", "plain" als "[0:0]".
-    cert_names: DNS-namen/IP's in het certificaat (om een hostnaam-mismatch na te bootsen).
-    timestamp_scale: vermenigvuldigt de tijdstempels in 'laatste waarde' (10 = 100 ns-ticks i.p.v. µs),
-        om een server met een andere tijdeenheid na te bootsen.
+    newest_age_s: how old the newest measurement is (0 = live).
+    schema_ids: "full" gives channel IDs as "<store>\\[0:0]", "plain" as "[0:0]".
+    cert_names: DNS names/IPs in the certificate (to simulate a hostname mismatch).
+    timestamp_scale: multiplies the timestamps in 'last value' (10 = 100 ns ticks instead of µs),
+        to simulate a server with a different time unit.
     """
 
     def __init__(
@@ -152,7 +152,7 @@ class FakeIbaHd:
         self._server.stop(grace=None).wait()
 
     def data_window_us(self) -> tuple[int, int]:
-        """(eerste, laatste) tijdstip met data, op het meetraster."""
+        """(first, last) timestamp with data, on the sample grid."""
         newest = int((time.time() - self.newest_age_s) * 1e6) // SAMPLE_PERIOD_US * SAMPLE_PERIOD_US
         return newest - HISTORY_S * 1_000_000, newest
 
@@ -216,7 +216,7 @@ class _Servicer(pb_grpc.HdApiServiceServicer):
             elif kind == DOUBLE:
                 out.double_values.avg_values.extend(analog_value(name, t).tolist())
             elif kind == DIGITAL:
-                # eigen tijdstippen: alleen de wisselmomenten, plus het laatste wisselmoment vóór het venster
+                # own timestamps: only the toggle moments, plus the last toggle moment before the window
                 edges = np.arange(lo // TOGGLE_US * TOGGLE_US, hi + 1, TOGGLE_US, dtype=np.int64)
                 out.digital_values.timestamp.extend(edges.tolist())
                 out.digital_values.value.extend(digital_state(edges).astype(float).tolist())
