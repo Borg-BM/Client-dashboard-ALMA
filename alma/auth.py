@@ -37,11 +37,11 @@ def safe_next(value: str | None) -> str:
     return value
 
 
-def _page(status: int, title: str, message: str, link: tuple[str, str] | None = ("/auth/login", "Opnieuw inloggen")) -> HTMLResponse:
+def _page(status: int, title: str, message: str, link: tuple[str, str] | None = ("/auth/login", "Log in again")) -> HTMLResponse:
     """Eenvoudige foutpagina; bevat alleen vaste tekst, nooit waarden uit het verzoek of van de IdP."""
     anchor = f'<p><a href="{link[0]}">{link[1]}</a></p>' if link else ""
     html = (
-        '<!doctype html><html lang="nl"><meta charset="utf-8">'
+        '<!doctype html><html lang="en"><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<meta name="color-scheme" content="light dark">'
         f"<title>{title}</title><h1>{title}</h1><p>{message}</p>{anchor}</html>"
@@ -112,7 +112,7 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
             # Bewust breed: netwerkfouten, een kapotte discovery-respons of een verkeerde issuer-URL
             # moeten allemaal een nette melding geven (en een traceback in de log), geen 500.
             log.exception("Starten van inloggen bij Authentik mislukt")
-            return _page(502, "Inloggen niet beschikbaar", "Authentik is nu niet bereikbaar. Probeer het straks opnieuw.")
+            return _page(502, "Login unavailable", "Authentik cannot be reached right now. Please try again shortly.")
 
     @app.get("/auth/callback")
     async def callback(request: Request):
@@ -121,21 +121,21 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
             token = await oidc.authorize_access_token(request)
         except OAuthError as exc:  # onjuiste state, fout van Authentik of een geweigerde code
             log.warning("Inloggen mislukt: %s", exc.error)
-            return _page(400, "Inloggen mislukt", "De inlogpoging is verlopen of ongeldig. Dit gebeurt ook als u in meerdere tabbladen tegelijk inlogt.")
+            return _page(400, "Login failed", "The login attempt has expired or is invalid. This also happens if you log in from several tabs at once.")
         except Exception:
             # Netwerkfout, of een id_token met ongeldige handtekening/claims: nooit inloggen, wel loggen.
             log.exception("Afronden van inloggen mislukt")
             return _page(
                 502,
-                "Inloggen mislukt",
-                "Het antwoord van Authentik kon niet worden gecontroleerd, of Authentik is niet bereikbaar. "
-                "Probeer het opnieuw; blijft dit gebeuren, neem dan contact op met de beheerder.",
+                "Login failed",
+                "The response from Authentik could not be verified, or Authentik cannot be reached. "
+                "Please try again; if this keeps happening, contact the administrator.",
             )
 
         claims = token.get("userinfo")  # alleen gevuld als de id_token (handtekening, nonce, iss, aud, exp) klopt
         if not claims or not claims.get("sub"):
             log.warning("Inloggen geweigerd: geen gevalideerde id_token in het antwoord")
-            return _page(400, "Inloggen mislukt", "Authentik gaf geen geldige identiteit terug.")
+            return _page(400, "Login failed", "Authentik did not return a valid identity.")
 
         if settings.allowed_groups:
             groups = claims.get("groups")
@@ -144,12 +144,12 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
                     groups = (await oidc.userinfo(token=token)).get("groups")
                 except Exception:
                     log.exception("Groepen ophalen via userinfo mislukt")
-                    return _page(502, "Inloggen niet beschikbaar", "Groepslidmaatschap kon niet worden gecontroleerd.")
+                    return _page(502, "Login unavailable", "Group membership could not be verified.")
             if isinstance(groups, str):
                 groups = [groups]
             if not set(groups or []) & set(settings.allowed_groups):
                 log.warning("Toegang geweigerd (geen toegestane groep): %s", _clip(claims.get("preferred_username") or claims["sub"]))
-                return _page(403, "Geen toegang", "Uw account heeft geen toegang tot dit dashboard. Vraag de beheerder om toegang.", link=None)
+                return _page(403, "No access", "Your account does not have access to this dashboard. Ask the administrator for access.", link=None)
 
         user = {
             "sub": _clip(claims["sub"]),
@@ -171,8 +171,8 @@ def install_auth(app: FastAPI, settings: Settings) -> None:
     async def logged_out():
         return _page(
             200,
-            "U bent uitgelogd",
-            "U bent uitgelogd bij het dashboard. Uw Authentik-sessie blijft actief; log daar ook uit als u een gedeelde computer gebruikt.",
+            "Logged out",
+            "You have been logged out of the dashboard. Your Authentik session stays active; log out there too if you are using a shared computer.",
         )
 
     @app.get("/api/me")

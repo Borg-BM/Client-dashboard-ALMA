@@ -14,7 +14,7 @@ async function getJson(url) {
   if (r.status === 401) {
     if (!reloading) {
       reloading = true;
-      setFooter("sessie verlopen, opnieuw inloggen…", true);
+      setFooter("session expired, logging in again…", true);
       location.reload();
     }
     throw new Error("401");
@@ -56,8 +56,8 @@ function setStatus(state, text) {
 
 // ---- Grafieken ------------------------------------------------------------------------------
 
-const clock = new Intl.DateTimeFormat("nl-NL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const clockShort = new Intl.DateTimeFormat("nl-NL", { hour: "2-digit", minute: "2-digit" });
+const clock = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const clockShort = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
 // Seconden tonen zolang de ticks dichter dan een minuut op elkaar staan, anders herhaalt elk label dezelfde minuut.
 // Dat hangt af van de data die er is, niet van de gekozen periode: een UDP-cache die net vult heeft maar seconden.
@@ -75,10 +75,10 @@ const CHARTS = {
     minSpan: 5,
     minSpan2: 4,
     series: [
-      ["tension_skid1_kn", "Skid 1 spanning (kN)", "--series-1"],
-      ["tension_skid2_kn", "Skid 2 spanning (kN)", "--series-2"],
-      ["tower_x", "Toren X (mm)", "--series-1", DASHED],
-      ["tower_y", "Toren Y (mm)", "--series-2", DASHED],
+      ["tension_skid1_kn", "Skid 1 tension (kN)", "--series-1"],
+      ["tension_skid2_kn", "Skid 2 tension (kN)", "--series-2"],
+      ["tower_x", "Tower X (mm)", "--series-1", DASHED],
+      ["tower_y", "Tower Y (mm)", "--series-2", DASHED],
     ],
   },
   tension: {
@@ -142,7 +142,7 @@ function buildChart(def, data) {
         ...(def.minSpan2 ? { y2: { range: paddedRange(def.minSpan2) } } : {}),
       },
       series: [
-        { label: "Tijd", value: (u, v) => (v == null ? "–" : clock.format(v * 1000)) },
+        { label: "Time", value: (u, v) => (v == null ? "–" : clock.format(v * 1000)) },
         ...def.series.map(([, label, color, options]) => ({
           label,
           stroke: css(color),
@@ -174,7 +174,7 @@ function renderChart(key, data) {
   if (!data.t.length) {
     charts[key]?.u.destroy();
     delete charts[key];
-    $(def.el).innerHTML = '<p class="nodata">Geen data in deze periode</p>';
+    $(def.el).innerHTML = '<p class="nodata">No data in this period</p>';
     return;
   }
   if (charts[key]) {
@@ -191,9 +191,9 @@ async function refreshCharts() {
     const data = await getJson(`/api/timeseries?minutes=${m}`);
     if (m !== minutes()) return; // verouderd antwoord: de nieuwe keuze heeft een eigen aanvraag
     for (const key of Object.keys(CHARTS)) renderChart(key, data);
-    setFooter("bijgewerkt " + clock.format(Date.now()));
+    setFooter("updated " + clock.format(Date.now()));
   } catch (e) {
-    if (!reloading && m === minutes()) setFooter("geen data (" + e.message + ")", true);
+    if (!reloading && m === minutes()) setFooter("no data (" + e.message + ")", true);
   }
 }
 
@@ -208,7 +208,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
 
 // ---- Joystick-cirkels -----------------------------------------------------------------------
 
-const STICK_LABELS = { tower: "Toren", vessel: "Schip" };
+const STICK_LABELS = { tower: "Tower", vessel: "Vessel" };
 
 function renderStick(key, m) {
   const root = $("stick-" + key);
@@ -218,7 +218,7 @@ function renderStick(key, m) {
     root.classList.add("stick--stale");
     root.classList.remove("stick--over");
     root.querySelector(".value").textContent = "–";
-    svg.setAttribute("aria-label", `${label}: geen actuele data`);
+    svg.setAttribute("aria-label", `${label}: no current data`);
     return;
   }
   root.classList.remove("stick--stale");
@@ -246,8 +246,8 @@ function renderStick(key, m) {
   root.classList.toggle("stick--over", magnitude > m.fullscale);
   const text = `${magnitude >= 100 ? magnitude.toFixed(0) : magnitude.toFixed(1)} mm`;
   root.querySelector(".value").textContent = text;
-  root.querySelector(".scale").textContent = `schaal ± ${m.fullscale} mm`;
-  svg.setAttribute("aria-label", `${label}: ${text} afwijking van het gemiddelde`);
+  root.querySelector(".scale").textContent = `scale ± ${m.fullscale} mm`;
+  svg.setAttribute("aria-label", `${label}: ${text} deviation from the mean`);
 }
 
 async function refreshLive() {
@@ -255,7 +255,7 @@ async function refreshLive() {
   try {
     const live = await getJson(`/api/live?minutes=${m}`);
     if (m !== minutes()) return; // zie refreshCharts
-    if (!live.ready || live.stale) throw new Error("geen actuele data");
+    if (!live.ready || live.stale) throw new Error("no current data");
     setStatus(live.compensation_active ? "on" : "off", live.mode.name);
     renderStick("tower", live.tower);
     renderStick("vessel", live.vessel);
@@ -271,7 +271,7 @@ async function refreshLive() {
 
 const PERIOD_STEPS = [0.5, 1, 2, 5, 10, 30, 60]; // minuten; een torenoscillatie duurt ~6 s, dus 1 minuut is de standaard
 const DEFAULT_PERIOD = 1;
-const periodLabel = (m) => (m < 1 ? `laatste ${Math.round(m * 60)} s` : `laatste ${m} min`);
+const periodLabel = (m) => (m < 1 ? `last ${Math.round(m * 60)} s` : `last ${m} min`);
 const MAX_PERIOD = 60; // langer dan dit weigert de API (422)
 
 // De stappen tot en met retention, plus retention zelf als die er niet in zit (12 -> 1, 2, 5, 10, 12).

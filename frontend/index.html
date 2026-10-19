@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="nl">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,18 +13,18 @@
   <header class="topbar">
     <img class="logo" src="/assets/bm-logo.png" width="875" height="223" alt="Barge Master - Motion Compensation Solutions">
     <div class="controls">
-      <label class="label" for="minutes">Periode</label>
-      <!-- Terugval voor als /api/health niet antwoordt: app.js vervangt deze opties door wat de databron kan leveren -->
+      <label class="label" for="minutes">Period</label>
+      <!-- Fallback for when /api/health does not answer: app.js replaces these options with what the data source can supply -->
       <select id="minutes">
-        <option value="0.5">laatste 30 s</option>
-        <option value="1" selected>laatste 1 min</option>
-        <option value="2">laatste 2 min</option>
-        <option value="5">laatste 5 min</option>
-        <option value="10">laatste 10 min</option>
+        <option value="0.5">last 30 s</option>
+        <option value="1" selected>last 1 min</option>
+        <option value="2">last 2 min</option>
+        <option value="5">last 5 min</option>
+        <option value="10">last 10 min</option>
       </select>
       <form class="user" id="user" method="post" action="/auth/logout" hidden>
         <span id="user-name"></span>
-        <button type="submit">Uitloggen</button>
+        <button type="submit">Log out</button>
       </form>
     </div>
   </header>
@@ -40,37 +40,37 @@
   </div>
 
   <div class="banner" id="demo-banner" hidden>
-    DEMO-DATA &mdash; dit dashboard toont gesimuleerde gegevens, geen metingen van de BM010.
+    DEMO DATA &mdash; this dashboard shows simulated data, not measurements from the BM010.
   </div>
 
-  <p class="key"><span class="swatch" aria-hidden="true"></span> Gearceerd: compensatie aan (CT low of damping)</p>
+  <p class="key"><span class="swatch" aria-hidden="true"></span> Shaded: compensation on (CT low or damping)</p>
 
   <main class="grid">
     <section class="card card--wide">
-      <h2>Spanning en torenbeweging <span class="unit">spanning links (kN), torenafwijking rechts (mm, gestippeld)</span></h2>
+      <h2>Tension and tower motion <span class="unit">tension left (kN), tower deviation right (mm, dashed)</span></h2>
       <div class="chart" id="chart-overlay"></div>
     </section>
 
     <section class="card">
-      <h2>Kabelspanning per skid <span class="unit">kN</span></h2>
+      <h2>Cable tension per skid <span class="unit">kN</span></h2>
       <div class="chart" id="chart-tension"></div>
     </section>
 
     <section class="card">
-      <h2>Afwijking toren <span class="unit">mm t.o.v. gemiddelde</span></h2>
+      <h2>Tower deviation <span class="unit">mm from mean</span></h2>
       <div class="chart" id="chart-tower"></div>
     </section>
 
     <section class="card">
-      <h2>Afwijking schip <span class="unit">mm t.o.v. gemiddelde</span></h2>
+      <h2>Vessel deviation <span class="unit">mm from mean</span></h2>
       <div class="chart" id="chart-vessel"></div>
     </section>
 
     <section class="card">
-      <h2>Positie nu <span class="unit">afwijking en richting</span></h2>
+      <h2>Position now <span class="unit">deviation and direction</span></h2>
       <div class="sticks">
         <figure class="stick" id="stick-tower">
-          <svg viewBox="-100 -100 200 200" role="img" aria-label="Toren: geen data">
+          <svg viewBox="-100 -100 200 200" role="img" aria-label="Tower: no data">
             <circle class="ring" r="90"/>
             <circle class="ring ring--mid" r="45"/>
             <line class="cross" x1="-90" y1="0" x2="90" y2="0"/>
@@ -82,11 +82,11 @@
             <polyline class="trail trail--3" points=""/>
             <circle class="dot" r="8"/>
           </svg>
-          <figcaption><strong>Toren</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
+          <figcaption><strong>Tower</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
         </figure>
 
         <figure class="stick" id="stick-vessel">
-          <svg viewBox="-100 -100 200 200" role="img" aria-label="Schip: geen data">
+          <svg viewBox="-100 -100 200 200" role="img" aria-label="Vessel: no data">
             <circle class="ring" r="90"/>
             <circle class="ring ring--mid" r="45"/>
             <line class="cross" x1="-90" y1="0" x2="90" y2="0"/>
@@ -98,7 +98,7 @@
             <polyline class="trail trail--3" points=""/>
             <circle class="dot" r="8"/>
           </svg>
-          <figcaption><strong>Schip</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
+          <figcaption><strong>Vessel</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
         </figure>
       </div>
     </section>
