@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from alma import analysis
 from alma import main as main_module
-from alma.config import CylinderGeometry, Settings
+from alma.config import DEFAULT_SYSTEM_MODES, SIGNALS, SKIDS, CylinderGeometry, Settings
 from alma.main import create_app
 from alma.sources.mock import CYCLE_S, TOWER_FREQ_HZ, MockSource
 
@@ -63,16 +63,18 @@ def test_mock_is_deterministic():
 def test_decimate_keeps_peaks_and_short_active_periods():
     n = 20_000
     index = pd.date_range("2026-01-01", periods=n, freq="100ms", tz="UTC")
-    df = pd.DataFrame({c: np.zeros(n) for c in ["compensation_active", *analysis.MOTION_COLUMNS, "tension_kn"]}, index=index)
+    columns = ["compensation_active", "system_mode", *analysis.MOTION_COLUMNS, "tension_skid1_kn"]
+    df = pd.DataFrame({c: np.zeros(n) for c in columns}, index=index)
     df.loc[index[12_345], "tower_x"] = 99.0  # een enkele piek
     df.loc[index[7_777], "tower_y"] = -88.0  # en een dal
     df.loc[index[3_000:3_002], "compensation_active"] = 1.0  # en een heel korte aan-periode
+    df.loc[index[3_000:3_002], "system_mode"] = 4.0  # met de bijbehorende modus
 
     out = analysis.decimate(df, 2_000)
     assert len(out) <= 2_000 + 2
     assert out.index.is_monotonic_increasing
     assert out["tower_x"].max() == 99.0 and out["tower_y"].min() == -88.0
-    assert out["compensation_active"].max() == 1.0
+    assert out["compensation_active"].max() == 1.0 and out["system_mode"].max() == 4.0
 
 
 def test_decimate_leaves_small_frames_alone():
@@ -105,7 +107,10 @@ def test_api_endpoints_without_login(client):
 
 def test_timeseries_has_everything_the_charts_need(client):
     series = client.get("/api/timeseries?minutes=60").json()
-    keys = ["t", "compensation_active", "tension_kn", "tower_x", "tower_y", "vessel_x", "vessel_y"]
+    keys = [
+        "t", "system_mode", "compensation_active", "tension_skid1_kn", "tension_skid2_kn",
+        "tower_x", "tower_y", "vessel_x", "vessel_y",
+    ]  # fmt: skip
     assert {len(series[k]) for k in keys} == {len(series["t"])}
     assert 0 < len(series["t"]) <= 2_002
     assert set(series["compensation_active"]) <= {0, 1}
@@ -116,6 +121,7 @@ def test_live_gives_status_and_dots(client):
     live = client.get("/api/live?minutes=10").json()
     assert live["ready"] is True and live["stale"] is False
     assert isinstance(live["compensation_active"], bool)
+    assert live["mode"]["name"] in DEFAULT_SYSTEM_MODES.values() and isinstance(live["mode"]["code"], int)
     for who, fullscale in (("tower", 60.0), ("vessel", 500.0)):
         m = live[who]
         assert m["fullscale"] == fullscale
@@ -148,7 +154,7 @@ def test_live_status_follows_the_data(monkeypatch):
     app = TestClient(create_app(Settings(_env_file=None, auth_enabled=False)))
     assert app.get("/api/live").json() == {"ready": False}
     series = app.get("/api/timeseries").json()
-    assert series["t"] == [] and series["tension_kn"] == []
+    assert series["t"] == [] and series["tension_skid1_kn"] == [] and series["tension_skid2_kn"] == []
     assert app.get("/api/overview").status_code == 200
 
 
@@ -159,3 +165,95 @@ def test_cylinder_geometry_from_environment(monkeypatch):
     assert settings.cylinder.bore_diameter_m == 0.25
     assert settings.cylinder.reeving_falls == 6
     assert settings.cylinder.rod_diameter_m == 0.140  # niet opgegeven: default blijft
+
+
+# ---- twee skids -----------------------------------------------------------------------------------------
+
+
+def test_every_skid_gets_its_own_tension():
+    df = analysis.add_derived(mock_window(60), GEO)
+    for n in SKIDS:
+        assert f"tension_skid{n}_kn" in df and f"force_skid{n}_kn" in df
+    assert "tension_kn" not in df  # er is geen samengevoegde spanning: de skids trekken in verschillende richtingen
+    # skid 2 volgt zijn eigen druk en niet die van skid 1
+    pressures = pd.DataFrame(
+        {"system_mode": [4.0], "tower_x": [0.0], "tower_y": [0.0], "vessel_x": [0.0], "vessel_y": [0.0],
+         "pressure_bore_skid1": [100.0], "pressure_rod_skid1": [0.0],
+         "pressure_bore_skid2": [50.0], "pressure_rod_skid2": [0.0]},
+        index=pd.DatetimeIndex(["2026-01-01"], tz="UTC"),
+    )  # fmt: skip
+    out = analysis.add_derived(pressures, GEO, baseline={c: 0.0 for c in analysis.MOTION_COLUMNS})
+    assert out["tension_skid1_kn"].iloc[0] == pytest.approx(2 * out["tension_skid2_kn"].iloc[0])
+
+
+def test_overview_reports_tension_per_skid():
+    result = analysis.overview(analysis.add_derived(mock_window(CYCLE_S), GEO))
+    assert set(result["skids"]) == {"1", "2"}
+    for stats in result["skids"].values():
+        assert stats["tension_peak_kn"] > stats["tension_mean_kn"] > 0 and stats["tension_amplitude_kn"] > 0
+
+
+# ---- systeemmodi ----------------------------------------------------------------------------------------
+
+
+def test_compensation_follows_the_system_mode():
+    raw = mock_window(CYCLE_S)
+    default = analysis.add_derived(raw, GEO)
+    assert set(raw["system_mode"].astype(int)) == set(DEFAULT_SYSTEM_MODES)  # de mock doorloopt alle modi
+    by_mode = default.groupby(raw["system_mode"].astype(int))["compensation_active"].max()
+    assert by_mode.to_dict() == {0: 0.0, 1: 0.0, 2: 0.0, 3: 1.0, 4: 1.0}  # CT low en damping tellen als aan
+    only_damping = analysis.add_derived(raw, GEO, compensating=[4])
+    assert only_damping.groupby(raw["system_mode"].astype(int))["compensation_active"].max().to_dict()[3] == 0.0
+
+
+def test_the_mock_skids_only_pull_when_the_system_does():
+    df = analysis.add_derived(mock_window(CYCLE_S), GEO)
+    amplitude = df.groupby(df["system_mode"].astype(int))["tension_skid1_kn"].agg(lambda s: s.max() - s.min())
+    assert amplitude[4] > amplitude[3] > amplitude[2]  # damping trekt harder dan CT low, daarvoor is het stil
+    assert amplitude[0] < 1  # zonder HPU staat er niets op
+
+
+def test_system_modes_and_compensating_modes_can_be_set_from_the_environment(monkeypatch):
+    monkeypatch.setenv("ALMA_SYSTEM_MODES", '{"10": "Uit", "20": "Dempen"}')
+    monkeypatch.setenv("ALMA_COMPENSATING_MODES", "20")
+    settings = Settings(_env_file=None, auth_enabled=False)
+    assert settings.system_modes == {10: "Uit", 20: "Dempen"} and settings.compensating_modes == [20]
+    live = TestClient(create_app(settings)).get("/api/live?minutes=1").json()
+    # de mock stuurt codes 0-4, die niet in deze tabel staan: ze krijgen een neutrale naam
+    assert live["mode"]["name"] == f"Mode {live['mode']['code']}"
+
+
+def test_compensating_modes_must_be_known_modes():
+    with pytest.raises(ValueError, match="ALMA_COMPENSATING_MODES"):
+        Settings(_env_file=None, auth_enabled=False, compensating_modes=[7])
+    with pytest.raises(ValueError, match="ALMA_SYSTEM_MODES"):
+        Settings(_env_file=None, auth_enabled=False, system_modes={0: " "})
+
+
+def test_the_telegram_format_matches_the_signals():
+    from alma.config import ROOT
+    from alma.ingest.format import PacketFormat
+
+    assert PacketFormat.load(ROOT / "udp_format.json", required_signals=SIGNALS).signals == tuple(
+        s for s in ("tower_x", "tower_y", "vessel_x", "vessel_y", "pressure_bore_skid1", "pressure_rod_skid1",
+                    "system_mode", "pressure_bore_skid2", "pressure_rod_skid2")
+    )  # fmt: skip
+
+
+# ---- korte vensters -------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("minutes", ["0.25", "0.5", "1", "1.5"])
+def test_short_windows_are_served(client, minutes):
+    for endpoint in ("timeseries", "live", "overview"):
+        assert client.get(f"/api/{endpoint}?minutes={minutes}").status_code == 200
+
+
+def test_a_half_minute_window_holds_about_half_a_minute(client):
+    series = client.get("/api/timeseries?minutes=0.5").json()
+    assert 28 <= series["t"][-1] - series["t"][0] <= 31 and 250 <= len(series["t"]) <= 310  # mock: 10 Hz
+
+
+@pytest.mark.parametrize("minutes", ["0.2", "0", "-1", "61", "nan", "inf"])
+def test_windows_outside_the_range_are_refused(client, minutes):
+    assert client.get(f"/api/timeseries?minutes={minutes}").status_code == 422

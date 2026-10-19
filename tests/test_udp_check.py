@@ -65,7 +65,7 @@ def test_telegrams_of_the_wrong_size_are_reported(capsys):
         code = check(port=port)
     out = capsys.readouterr().out
     assert code == 1
-    assert "30 bytes" in out and "verwacht 28 bytes" in out and "Niet alle telegrammen passen" in out
+    assert "30 bytes" in out and "verwacht 36 bytes" in out and "Niet alle telegrammen passen" in out
 
 
 def test_silence_is_reported_with_hints(capsys):
@@ -97,9 +97,9 @@ def test_dump_shows_every_offset_in_both_byte_orders(capsys):
         check("--dump", port=port)
     out = capsys.readouterr().out
     assert "FLOAT big" in out and "FLOAT little" in out
-    rows = [line for line in out.splitlines() if line.strip().split(" ")[0] in {"0", "4", "8", "12", "16", "20", "24"}]
-    assert len(rows) == 7
-    assert "4" in rows[0].split()  # tower_x (4.0): de eerste float in big endian is de waarde die we stuurden
+    rows = [line for line in out.splitlines() if line.strip().split(" ")[0] in {str(o) for o in range(0, 36, 4)}]
+    assert len(rows) == 9
+    assert f"{VALUES['tower_x']:g}" in rows[0].split()  # tower_x staat op offset 0: de eerste float (big endian)
 
 
 def test_dump_table_decodes_floats_and_integers():
@@ -107,7 +107,7 @@ def test_dump_table_decodes_floats_and_integers():
     table = udp_check.dump(packet, step=4)
     first = [line for line in table.splitlines() if line.lstrip().startswith("0 ")][0].split()
     assert float(first[5]) == VALUES["tower_x"]  # offset, vier bytes, FLOAT big
-    assert "Telegram van 28 bytes" in table
+    assert f"Telegram van {len(packet)} bytes" in table
 
 
 def test_bind_must_be_an_ip_address():

@@ -12,11 +12,12 @@ from fastapi.staticfiles import StaticFiles
 
 from alma import analysis
 from alma.auth import install_auth
-from alma.config import ROOT, Settings, get_settings
+from alma.config import ROOT, SKIDS, Settings, get_settings
 from alma.sources import create_source
 from alma.sources.base import SourceUnavailable
 
 MAX_WINDOW_MINUTES = 60  # bovengrens van ?minutes= bij alle endpoints
+MIN_WINDOW_MINUTES = 0.25  # ondergrens (15 s): een torenoscillatie duurt ~6 s, dus minder zegt niets
 MAX_ANALYSIS_POINTS = 40_000
 MAX_CHART_POINTS = 2_000
 LIVE_SECONDS = 10  # staart van de joystick-cirkels
@@ -77,16 +78,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="ALMA BM010 dashboard", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
 
-    def load(minutes: int):
+    compensating = settings.compensating_modes
+
+    def load(minutes: float):
         """Venster met afwijkingen t.o.v. het gemiddelde over dat venster."""
         end = datetime.now(timezone.utc)
         raw = source.read(end - timedelta(minutes=minutes), end, MAX_ANALYSIS_POINTS)
-        return analysis.add_derived(raw, settings.cylinder)
+        return analysis.add_derived(raw, settings.cylinder, compensating=compensating)
 
-    baselines: dict[int, tuple[float, dict | None]] = {}
+    baselines: dict[float, tuple[float, dict | None]] = {}
     baselines_lock = threading.Lock()
 
-    def baseline_for(minutes: int) -> dict | None:
+    def baseline_for(minutes: float) -> dict | None:
         """Nulpunt van de afwijking voor het gekozen venster. Kort gecached, zodat de joystick die
         elke seconde ververst niet steeds het hele venster bij de bron ophaalt."""
         now = time.monotonic()
@@ -94,12 +97,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cached = baselines.get(minutes)
             if cached and now - cached[0] < BASELINE_TTL_S:
                 return cached[1]
+            for stale in [k for k, (at, _) in baselines.items() if now - at >= BASELINE_TTL_S]:
+                del baselines[stale]  # het venster is een kommagetal: oude sleutels opruimen houdt de cache klein
         end = datetime.now(timezone.utc)
         raw = source.read(end - timedelta(minutes=minutes), end, MAX_ANALYSIS_POINTS)
         value = analysis.motion_baseline(raw) if len(raw) else None
         with baselines_lock:
             baselines[minutes] = (now, value)
         return value
+
+    def mode_of(value: float) -> dict:
+        code = int(round(float(value)))
+        return {"code": code, "name": settings.system_modes.get(code, f"Mode {code}")}
 
     last_logged: dict = {"message": None, "at": 0.0}
 
@@ -132,16 +141,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return body
 
     @app.get("/api/overview")
-    def overview(minutes: int = Query(10, ge=1, le=MAX_WINDOW_MINUTES)):
+    def overview(minutes: float = Query(10, ge=MIN_WINDOW_MINUTES, le=MAX_WINDOW_MINUTES)):
         return analysis.overview(load(minutes))
 
     @app.get("/api/timeseries")
-    def timeseries(minutes: int = Query(10, ge=1, le=MAX_WINDOW_MINUTES)):
+    def timeseries(minutes: float = Query(10, ge=MIN_WINDOW_MINUTES, le=MAX_WINDOW_MINUTES)):
         df = analysis.decimate(load(minutes), MAX_CHART_POINTS)
         return {
             "t": analysis.epoch_seconds(df.index).round(3).tolist(),
+            "system_mode": df["system_mode"].round().astype(int).tolist(),
             "compensation_active": df["compensation_active"].round().astype(int).tolist(),
-            "tension_kn": df["tension_kn"].round(2).tolist(),
+            **{f"tension_skid{n}_kn": df[f"tension_skid{n}_kn"].round(2).tolist() for n in SKIDS},
             "tower_x": df["tower_x"].round(2).tolist(),
             "tower_y": df["tower_y"].round(2).tolist(),
             "vessel_x": df["vessel_x"].round(2).tolist(),
@@ -149,15 +159,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/live")
-    def live(minutes: int = Query(10, ge=1, le=MAX_WINDOW_MINUTES)):
-        """Actuele stand voor de statusbalk en de joystick-cirkels: compensatie aan/uit, de laatste
-        afwijking van toren en schip, en een korte staart van de afgelopen seconden."""
+    def live(minutes: float = Query(10, ge=MIN_WINDOW_MINUTES, le=MAX_WINDOW_MINUTES)):
+        """Actuele stand voor de statusbalk en de joystick-cirkels: de systeemmodus, compensatie aan/uit, de
+        laatste afwijking van toren en schip, en een korte staart van de afgelopen seconden."""
         end = datetime.now(timezone.utc)
         recent = source.read(end - timedelta(seconds=LIVE_SECONDS), end, 2_000)
         baseline = baseline_for(minutes)
         if recent.empty or baseline is None:
             return {"ready": False}
-        df = analysis.add_derived(recent, settings.cylinder, baseline=baseline)
+        df = analysis.add_derived(recent, settings.cylinder, baseline=baseline, compensating=compensating)
         age_s = (pd.Timestamp(end) - recent.index[-1]).total_seconds()
 
         def motion(prefix: str, fullscale: float) -> dict:
@@ -174,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "stale": age_s > settings.stale_after_s,
             "age_s": round(age_s, 1),
             "compensation_active": bool(df["compensation_active"].iloc[-1] > 0.5),
+            "mode": mode_of(df["system_mode"].iloc[-1]),
             "tower": motion("tower", settings.tower_fullscale_mm),
             "vessel": motion("vessel", settings.vessel_fullscale_mm),
         }

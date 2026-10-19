@@ -919,7 +919,7 @@ def test_frames_feed_straight_into_the_existing_analysis():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     source = MockSource().read(start, start + timedelta(minutes=2), 40_000)
     cache = SampleCache(
-        SIGNALS, retention_s=600, max_samples=5_000, flags=["compensation_active"], clock=Clock(epoch(source)[-1])
+        SIGNALS, retention_s=600, max_samples=5_000, flags=["system_mode"], clock=Clock(epoch(source)[-1])
     )
     for stamp, values in zip(epoch(source).tolist(), source.to_dict("records"), strict=True):
         assert cache.append(stamp, values)

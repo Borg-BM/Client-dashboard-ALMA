@@ -38,11 +38,15 @@ FLOAT, DOUBLE, DIGITAL, STRING = (
 CHANNELS = {
     "tower_x": ("[0:0]", "Tower X", "mm", FLOAT),
     "tower_y": ("[0:1]", "Tower Y", "mm", DOUBLE),
-    "pressure_bore": ("[1:0]", "Pressure bore", "bar", FLOAT),
-    "pressure_rod": ("[1:1]", "Pressure rod", "bar", DOUBLE),
+    "pressure_bore_skid1": ("[1:0]", "Pressure bore skid 1", "bar", FLOAT),
+    "pressure_rod_skid1": ("[1:1]", "Pressure rod skid 1", "bar", DOUBLE),
+    "pressure_bore_skid2": ("[1:2]", "Pressure bore skid 2", "bar", FLOAT),
+    "pressure_rod_skid2": ("[1:3]", "Pressure rod skid 2", "bar", DOUBLE),
     "vessel_x": ("[2:0]", "Vessel X", "mm", FLOAT),
     "vessel_y": ("[2:1]", "Vessel Y", "mm", FLOAT),
-    "compensation_active": ("[3:0]", "Compensation active", "", DIGITAL),
+    "system_mode": ("[3:0]", "System mode", "", DOUBLE),
+    # Geen onderdeel van SIGNALS: houdt het digitale pad van de client onder test (eigen tijdstippen per kanaal)
+    "pump_running": ("[3:1]", "Pump running", "", DIGITAL),
 }
 TEXT_CHANNEL = ("[9:0]", "Operator note", "", STRING)
 

@@ -22,7 +22,7 @@ class DataSource(Protocol):
         """Geef data tussen start en end (UTC) terug.
 
         Index: UTC DatetimeIndex. Kolommen: de logische signalen uit alma.config.SIGNALS
-        (tower_*/vessel_* in mm, pressure_* in bar, compensation_active als 0/1).
+        (tower_*/vessel_* in mm, pressure_*_skid1/2 in bar, system_mode als modenummer).
         Rijen met ontbrekende waarden worden weggelaten. Bij een onbereikbare bron: SourceUnavailable.
         """
         ...

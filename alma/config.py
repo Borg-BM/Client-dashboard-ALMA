@@ -9,16 +9,22 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 ROOT = Path(__file__).resolve().parent.parent
 
 # Logische signalen die de rest van de code gebruikt, losgekoppeld van ibaHD-kanaal-ID's.
-# Tower/vessel signals are MRU displacements in mm; pressures in bar; compensation_active is 0/1.
+# Tower/vessel signals are MRU displacements in mm; pressures in bar; system_mode is the integer mode code of the
+# PLC. Twee skids trekken aan de toren (skid 1 in X, skid 2 in Y), elk met druk aan bodem- en stangzijde.
+SKIDS = (1, 2)
 SIGNALS = [
-    "compensation_active",
-    "pressure_bore",
-    "pressure_rod",
+    "system_mode",
+    *[f"pressure_{side}_skid{n}" for n in SKIDS for side in ("bore", "rod")],
     "tower_x",
     "tower_y",
     "vessel_x",
     "vessel_y",
 ]
+
+# LET OP: placeholdercodes, vervangen door de echte modenummers van de BM010-PLC (ALMA_SYSTEM_MODES).
+DEFAULT_SYSTEM_MODES = {0: "System off", 1: "HPU on", 2: "Position control", 3: "CT low", 4: "Damping"}
+# Modi waarin het systeem kracht op de toren zet; die tellen als 'compensatie aan' (arcering, dempingspercentage).
+DEFAULT_COMPENSATING_MODES = [3, 4]
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -49,7 +55,12 @@ class Settings(BaseSettings):
     source: str = "mock"  # mock, ibahd of udp
     ibahd_quick_connect: Path = ROOT / "secrets" / "quick_connect.json"
     signal_map: Path = ROOT / "signals.json"
-    cylinder: CylinderGeometry = CylinderGeometry()
+    cylinder: CylinderGeometry = CylinderGeometry()  # beide skids: zelfde cilinder tot er andere gegevens zijn
+
+    # Systeemmodus: de PLC stuurt een modenummer (signaal system_mode). Hier staat welk nummer welke naam is, en
+    # welke modi als compensatie aan tellen. Als JSON in de omgeving: ALMA_SYSTEM_MODES='{"0": "System off", ...}'
+    system_modes: dict[int, str] = DEFAULT_SYSTEM_MODES
+    compensating_modes: Annotated[list[int], NoDecode] = DEFAULT_COMPENSATING_MODES  # bv. 3,4
 
     # Live ingest (ALMA_SOURCE=udp): de ibaHD-server levert niet in realtime, dus iba (ibaPDA, Generic UDP
     # output module) stuurt de metingen als UDP-telegrammen naar deze poort. De server bewaart de laatste
@@ -81,12 +92,23 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = None
     session_max_age_s: int = 8 * 3600
 
-    @field_validator("allowed_groups", "udp_allowed_sources", mode="before")
+    @field_validator("allowed_groups", "udp_allowed_sources", "compensating_modes", mode="before")
     @classmethod
     def _split_list(cls, value):
         if isinstance(value, str):
             return [g.strip() for g in value.split(",") if g.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _check_system_modes(self) -> "Settings":
+        if not self.system_modes or any(not name.strip() for name in self.system_modes.values()):
+            raise ValueError("ALMA_SYSTEM_MODES moet minstens een modus met een naam bevatten")
+        unknown = sorted(set(self.compensating_modes) - set(self.system_modes))
+        if unknown:
+            raise ValueError(
+                f"ALMA_COMPENSATING_MODES bevat {unknown}, maar die modenummers staan niet in ALMA_SYSTEM_MODES"
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_udp_settings(self) -> "Settings":

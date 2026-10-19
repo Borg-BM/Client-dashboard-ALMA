@@ -68,13 +68,20 @@ def test_read_returns_exactly_what_was_recorded(files):
     assert 280 <= len(df) <= 301  # 30 s op 10 Hz: bewijst dat het tijdbereik in µs goed aankomt
 
     t_us = epoch_us(df.index)
-    for name in SIGNALS:
+    for name in SIGNALS:  # float- én double-kanalen komen op de juiste tijd en waarde terug
         assert df[name].dtype == np.float64 and not df[name].isna().any()
-        if name != "compensation_active":  # float- én double-kanalen komen op de juiste tijd en waarde terug
-            np.testing.assert_allclose(df[name], analog_value(name, t_us), rtol=1e-5)
+        np.testing.assert_allclose(df[name], analog_value(name, t_us), rtol=1e-5)
+
+
+def test_a_digital_channel_is_laid_on_the_time_grid_of_the_others(files):
+    from alma.sources.ibahd import connect, fetch_channels, load_quick_connect
+
+    start, end = window(30)
+    channels = {"tower_x": full_id("tower_x"), "pump_running": full_id("pump_running")}
+    df = fetch_channels(connect(load_quick_connect(files[0])), channels, start, end, 2_000)
     # Het digitale kanaal heeft eigen tijdstippen (alleen de wisselmomenten) en wordt op het raster gelegd
-    np.testing.assert_array_equal(df["compensation_active"], digital_state(t_us))
-    assert set(df["compensation_active"]) == {0.0, 1.0}
+    np.testing.assert_array_equal(df["pump_running"], digital_state(epoch_us(df.index)))
+    assert set(df["pump_running"]) == {0.0, 1.0}
 
 
 def test_read_respects_max_points(files):
@@ -268,12 +275,12 @@ def test_check_lists_and_filters_channels(files, fake):
     assert listed_channels(everything) == set(CHANNELS) and TEXT_CHANNEL[1] in everything
     _, filtered = run_check(files, fake, grep="tower")
     assert listed_channels(filtered) == {"tower_x", "tower_y"}
-    assert "2 van 8 kanalen" in filtered
+    assert f"2 van {len(CHANNELS) + 1} kanalen" in filtered  # de kanalen van de fake plus het tekstkanaal
 
 
 def test_check_reads_an_explicit_channel(files, fake):
-    ok, text = run_check(files, fake, channel_ids=[full_id("pressure_bore")], minutes=0.5)
-    assert ok and f"{full_id('pressure_bore')}" in text and "Meetreeks van 0.5 min" in text
+    ok, text = run_check(files, fake, channel_ids=[full_id("pressure_bore_skid1")], minutes=0.5)
+    assert ok and f"{full_id('pressure_bore_skid1')}" in text and "Meetreeks van 0.5 min" in text
 
 
 def test_check_warns_when_the_newest_data_is_old(tmp_path):

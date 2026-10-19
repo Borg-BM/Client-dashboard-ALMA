@@ -16,9 +16,11 @@
       <label class="label" for="minutes">Periode</label>
       <!-- Terugval voor als /api/health niet antwoordt: app.js vervangt deze opties door wat de databron kan leveren -->
       <select id="minutes">
-        <option value="10" selected>laatste 10 min</option>
-        <option value="30">laatste 30 min</option>
-        <option value="60">laatste 60 min</option>
+        <option value="0.5">laatste 30 s</option>
+        <option value="1" selected>laatste 1 min</option>
+        <option value="2">laatste 2 min</option>
+        <option value="5">laatste 5 min</option>
+        <option value="10">laatste 10 min</option>
       </select>
       <form class="user" id="user" method="post" action="/auth/logout" hidden>
         <span id="user-name"></span>
@@ -41,11 +43,16 @@
     DEMO-DATA &mdash; dit dashboard toont gesimuleerde gegevens, geen metingen van de BM010.
   </div>
 
-  <p class="key"><span class="swatch" aria-hidden="true"></span> Gearceerd: compensation aan</p>
+  <p class="key"><span class="swatch" aria-hidden="true"></span> Gearceerd: compensatie aan (CT low of damping)</p>
 
   <main class="grid">
+    <section class="card card--wide">
+      <h2>Spanning en torenbeweging <span class="unit">spanning links (kN), torenafwijking rechts (mm, gestippeld)</span></h2>
+      <div class="chart" id="chart-overlay"></div>
+    </section>
+
     <section class="card">
-      <h2>Kabelspanning <span class="unit">kN</span></h2>
+      <h2>Kabelspanning per skid <span class="unit">kN</span></h2>
       <div class="chart" id="chart-tension"></div>
     </section>
 

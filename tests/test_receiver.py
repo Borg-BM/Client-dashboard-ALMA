@@ -32,7 +32,7 @@ def make():
     started: list[UdpReceiver] = []
 
     def build(*, allowed_sources=("127.0.0.1",), clock=time.time) -> tuple[UdpReceiver, SampleCache]:
-        cache = SampleCache(SIGNALS, retention_s=600, max_samples=10_000, flags=("compensation_active",), clock=clock)
+        cache = SampleCache(SIGNALS, retention_s=600, max_samples=10_000, flags=("system_mode",), clock=clock)
         receiver = UdpReceiver(
             FORMAT, cache, bind="127.0.0.1", port=0, allowed_sources=allowed_sources, clock=clock
         )
@@ -64,7 +64,7 @@ def test_a_telegram_ends_up_in_the_cache(make):
     assert stats["accepted"] == stats["received"] == 1 and stats["last_packet_age_s"] < 2
     frame = cache.window(0, time.time() + 1, 100)
     assert len(frame) == 1 and list(frame.columns) == SIGNALS
-    assert frame.iloc[0]["pressure_bore"] == pytest.approx(VALUES["pressure_bore"])
+    assert frame.iloc[0]["pressure_bore_skid1"] == pytest.approx(VALUES["pressure_bore_skid1"])
 
 
 def test_before_any_telegram_there_is_nothing_to_report(make):

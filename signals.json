@@ -1,7 +1,9 @@
 {
-  "compensation_active": "<channel_id>",
-  "pressure_bore": "<channel_id>",
-  "pressure_rod": "<channel_id>",
+  "system_mode": "<channel_id>",
+  "pressure_bore_skid1": "<channel_id>",
+  "pressure_rod_skid1": "<channel_id>",
+  "pressure_bore_skid2": "<channel_id>",
+  "pressure_rod_skid2": "<channel_id>",
   "tower_x": "<channel_id>",
   "tower_y": "<channel_id>",
   "vessel_x": "<channel_id>",

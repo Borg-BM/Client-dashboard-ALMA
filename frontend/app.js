@@ -37,19 +37,21 @@ function setFooter(text, isError = false) {
   $("footer").className = "footer" + (isError ? " error" : "");
 }
 
-// ---- Compensatiebalk ------------------------------------------------------------------------
+// ---- Statusbalk: de systeemmodus -------------------------------------------------------------
 
+// Groen als het systeem kracht op de toren zet (compensatie aan: CT low, damping), rood in de andere modi.
 const STATES = {
-  on: { cls: "status--on", text: "COMPENSATION ON" },
-  off: { cls: "status--off", text: "COMPENSATION OFF" },
-  nodata: { cls: "status--nodata", text: "NO DATA" },
+  on: "status--on",
+  off: "status--off",
+  nodata: "status--nodata",
 };
-let currentState = null;
-function setStatus(state) {
-  if (state === currentState) return; // alleen bij een wijziging, anders leest een schermlezer elke seconde voor
-  currentState = state;
-  $("status").className = "status " + STATES[state].cls;
-  $("status-label").textContent = STATES[state].text;
+let currentStatus = null;
+function setStatus(state, text) {
+  const label = text.toUpperCase();
+  if (currentStatus === state + label) return; // alleen bij een wijziging, anders leest een schermlezer elke seconde voor
+  currentStatus = state + label;
+  $("status").className = "status " + STATES[state];
+  $("status-label").textContent = label;
 }
 
 // ---- Grafieken ------------------------------------------------------------------------------
@@ -63,9 +65,27 @@ function timeLabels(u, splits, axisIdx, space, incr) {
   return splits.map((v) => (incr >= 60 ? clockShort : clock).format(v * 1000));
 }
 
-// [kolom in /api/timeseries, naam, kleurtoken]. X en Y houden in alle grafieken dezelfde kleur.
+// [kolom in /api/timeseries, naam, kleurtoken, opties]. X en Y houden in alle grafieken dezelfde kleur; skid 1
+// trekt in X en skid 2 in Y, dus ze delen de kleur van die richting. Opties: scale "y2" zet de lijn op de rechteras
+// (minSpan2 is de minimale hoogte daarvan), dash maakt de lijn gestippeld.
+const DASHED = { scale: "y2", dash: [6, 4] };
 const CHARTS = {
-  tension: { el: "chart-tension", minSpan: 5, series: [["tension_kn", "Kabelspanning (kN)", "--series-1"]] },
+  overlay: {
+    el: "chart-overlay",
+    minSpan: 5,
+    minSpan2: 4,
+    series: [
+      ["tension_skid1_kn", "Skid 1 spanning (kN)", "--series-1"],
+      ["tension_skid2_kn", "Skid 2 spanning (kN)", "--series-2"],
+      ["tower_x", "Toren X (mm)", "--series-1", DASHED],
+      ["tower_y", "Toren Y (mm)", "--series-2", DASHED],
+    ],
+  },
+  tension: {
+    el: "chart-tension",
+    minSpan: 5,
+    series: [["tension_skid1_kn", "Skid 1 (kN)", "--series-1"], ["tension_skid2_kn", "Skid 2 (kN)", "--series-2"]],
+  },
   tower: { el: "chart-tower", minSpan: 4, series: [["tower_x", "X (mm)", "--series-1"], ["tower_y", "Y (mm)", "--series-2"]] },
   vessel: { el: "chart-vessel", minSpan: 40, series: [["vessel_x", "X (mm)", "--series-1"], ["vessel_y", "Y (mm)", "--series-2"]] },
 };
@@ -116,14 +136,25 @@ function buildChart(def, data) {
       width: el.clientWidth || 600,
       height: chartHeight(),
       padding: [8, 26, 0, 0], // rechts de helft van een tijdlabel, anders wordt het laatste label afgekapt
-      scales: { x: { time: true }, y: { range: paddedRange(def.minSpan) } },
+      scales: {
+        x: { time: true },
+        y: { range: paddedRange(def.minSpan) },
+        ...(def.minSpan2 ? { y2: { range: paddedRange(def.minSpan2) } } : {}),
+      },
       series: [
         { label: "Tijd", value: (u, v) => (v == null ? "–" : clock.format(v * 1000)) },
-        ...def.series.map(([, label, color]) => ({ label, stroke: css(color), width: 2, points: { show: false } })),
+        ...def.series.map(([, label, color, options]) => ({
+          label,
+          stroke: css(color),
+          width: 2,
+          points: { show: false },
+          ...options,
+        })),
       ],
       axes: [
         { ...axis, size: 32, space: 70, values: timeLabels },
         { ...axis, size: 52 },
+        ...(def.minSpan2 ? [{ ...axis, scale: "y2", side: 1, size: 52, grid: { show: false } }] : []),
       ],
       cursor: { drag: { x: false, y: false } },
       hooks: { drawClear: [(u) => drawBands(u, chart.active, shade)] },
@@ -225,12 +256,12 @@ async function refreshLive() {
     const live = await getJson(`/api/live?minutes=${m}`);
     if (m !== minutes()) return; // zie refreshCharts
     if (!live.ready || live.stale) throw new Error("geen actuele data");
-    setStatus(live.compensation_active ? "on" : "off");
+    setStatus(live.compensation_active ? "on" : "off", live.mode.name);
     renderStick("tower", live.tower);
     renderStick("vessel", live.vessel);
   } catch (e) {
     if (m !== minutes()) return;
-    setStatus("nodata");
+    setStatus("nodata", "No data");
     renderStick("tower", null);
     renderStick("vessel", null);
   }
@@ -238,8 +269,9 @@ async function refreshLive() {
 
 // ---- Periode: alleen aanbieden wat de bron kan leveren --------------------------------------
 
-const PERIOD_STEPS = [1, 2, 5, 10, 30, 60]; // minuten
-const DEFAULT_PERIOD = 10;
+const PERIOD_STEPS = [0.5, 1, 2, 5, 10, 30, 60]; // minuten; een torenoscillatie duurt ~6 s, dus 1 minuut is de standaard
+const DEFAULT_PERIOD = 1;
+const periodLabel = (m) => (m < 1 ? `laatste ${Math.round(m * 60)} s` : `laatste ${m} min`);
 const MAX_PERIOD = 60; // langer dan dit weigert de API (422)
 
 // De stappen tot en met retention, plus retention zelf als die er niet in zit (12 -> 1, 2, 5, 10, 12).
@@ -249,7 +281,7 @@ function periodChoices(retention) {
   return choices;
 }
 
-// 10 minuten als dat kan, anders de langste periode die er is (3 -> 3).
+// 1 minuut als dat kan, anders de langste periode die er is.
 function defaultPeriod(choices) {
   return choices.includes(DEFAULT_PERIOD) ? DEFAULT_PERIOD : choices[choices.length - 1];
 }
@@ -270,7 +302,7 @@ function applyRetention(value) {
   const before = Number(select.value);
   const selected = choices.includes(before) ? before : defaultPeriod(choices);
   // selected-attribuut mee: zo is de keuze ook in een DOM-dump te zien
-  select.replaceChildren(...choices.map((m) => new Option(`laatste ${m} min`, m, m === selected, m === selected)));
+  select.replaceChildren(...choices.map((m) => new Option(periodLabel(m), m, m === selected, m === selected)));
   if (selected !== before) refreshAll(); // de grafieken tonen nog de oude periode: niet wachten op de volgende ronde
 }
 

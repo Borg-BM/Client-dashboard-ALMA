@@ -75,6 +75,7 @@ button:hover, select:hover { border-color: #051541; }
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
   min-width: 0;
 }
+.card--wide { grid-column: 1 / -1; }
 .card h2 { font-size: 14px; margin: 0 0 8px; }
 .unit { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
 .chart { min-height: 200px; }

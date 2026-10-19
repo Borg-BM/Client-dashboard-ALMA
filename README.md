@@ -73,6 +73,8 @@ Alles via omgevingsvariabelen of `.env` (zie `.env.example`).
 | `ALMA_UDP_ALLOWED_SOURCES` | Verplicht bij `udp`: IP's of netwerken (komma-gescheiden) waarvan telegrammen worden aangenomen |
 | `ALMA_UDP_ALLOW_ANY_SOURCE` | `true` laat elk bronadres toe; alleen voor lokale ontwikkeling, niet samen met het filter |
 | `ALMA_CACHE_MINUTES` | Hoeveel minuten metingen in het geheugen blijven (1-60, standaard 10); de periodekeuze volgt dit |
+| `ALMA_SYSTEM_MODES` | Welk modenummer van de PLC welke naam heeft, als JSON, bv. `{"0": "System off", "1": "HPU on", ...}`. De standaard (0-4: System off, HPU on, Position control, CT low, Damping) zijn **placeholders** |
+| `ALMA_COMPENSATING_MODES` | Modenummers (komma-gescheiden) die als 'compensatie aan' tellen: groene arcering en dempingspercentage (standaard `3,4` = CT low en damping) |
 | `ALMA_UDP_FORMAT` | Pad naar het telegramformaat (standaard `udp_format.json`) |
 | `ALMA_UDP_BIND`, `ALMA_UDP_MAX_SAMPLES` | Luisteradres (standaard `0.0.0.0`) en harde geheugengrens van de cache (standaard 200.000 metingen) |
 | `ALMA_PUBLIC_URL` | Externe basis-URL, `https`, zonder pad |
@@ -104,7 +106,7 @@ UDP-poort willen openen en de pakketten onderling verdelen.
 ibaPDA stuurt per cyclus (minimaal 50 ms, dus hooguit 20 per seconde) één telegram met alle
 signalen op vaste plaatsen. Het bestand beschrijft die indeling met dezelfde begrippen als de
 ibaPDA-module: offset, datatype (BYTE, WORD, DWORD, SINT, INT, DINT, LINT, FLOAT, DOUBLE) en voor
-een digitaal signaal een bitnummer. De standaardindeling (big endian, 28 bytes):
+een digitaal signaal een bitnummer. De standaardindeling (big endian, 36 bytes):
 
 | Offset | Type | Bit | Signaal |
 | --- | --- | --- | --- |
@@ -112,9 +114,32 @@ een digitaal signaal een bitnummer. De standaardindeling (big endian, 28 bytes):
 | 4 | FLOAT | | `tower_y` (mm) |
 | 8 | FLOAT | | `vessel_x` (mm) |
 | 12 | FLOAT | | `vessel_y` (mm) |
-| 16 | FLOAT | | `pressure_bore` (bar) |
-| 20 | FLOAT | | `pressure_rod` (bar) |
-| 24 | DWORD | 0 | `compensation_active` (0 of 1) |
+| 16 | FLOAT | | `pressure_bore_skid1` (bar) |
+| 20 | FLOAT | | `pressure_rod_skid1` (bar) |
+| 24 | DWORD | | `system_mode` (modenummer, 0-255) |
+| 28 | FLOAT | | `pressure_bore_skid2` (bar) |
+| 32 | FLOAT | | `pressure_rod_skid2` (bar) |
+
+Twee skids trekken aan de toren: skid 1 in X, skid 2 in Y. Het dashboard rekent per skid de
+kabelspanning uit (cilinderdruk, nu met dezelfde placeholder-geometrie voor beide) en toont die in
+dezelfde grafiek. De spanning van de twee skids wordt niet opgeteld: ze trekken in verschillende
+richtingen.
+
+### Systeemmodus
+
+De PLC stuurt de modus als één getal (`system_mode`). De statusbalk toont de naam ervan. Welk getal
+welke modus is, staat in `ALMA_SYSTEM_MODES`; de standaardnummers zijn placeholders en moeten
+overeenkomen met de PLC. Een nummer dat niet in de tabel staat, toont als `MODE <nummer>`. Welke
+modi als compensatie aan tellen (groene arcering, dempingspercentage in `/api/overview`) staat in
+`ALMA_COMPENSATING_MODES`: standaard CT low en damping.
+
+### Periode en overlay
+
+De periodekeuze begint bij 30 seconden (standaard 1 minuut): een torenoscillatie duurt zo'n 6 s,
+dus een minuut toont ongeveer tien oscillaties. De API (`?minutes=`) accepteert 0,25 tot 60 minuten.
+De bovenste grafiek legt de spanning van beide skids (links, kN) over de torenbeweging in X en Y
+(rechts, mm, gestippeld). Zo is te zien of de spanning op tijd en snel genoeg wordt gezet ten
+opzichte van de beweging.
 
 Per signaal kunnen `scale`, `bias`, `min` en `max` worden opgegeven (waarde = ruw × scale + bias;
 een telegram met een waarde buiten min/max wordt geweigerd). `header_bytes` slaat een vaste kop
@@ -130,11 +155,11 @@ Labels verschillen per ibaPDA-versie; zie de handleiding van *ibaPDA-Interface-G
 1. Voeg onder *Outputs* bij de interface *Generic UDP* een uitvoermodule toe.
 2. Doeladres: het IP-adres van de server binnen het VPN (het tunnel-IP), doelpoort: `ALMA_UDP_PORT`
    (standaard 5005).
-3. Updatetijd: 50 ms of hoger. 100 ms (10 Hz) is ruim genoeg voor een torenfrequentie rond 0,3 Hz.
+3. Updatetijd: 50 ms of hoger. 100 ms (10 Hz) is ruim genoeg voor een torenoscillatie van ~6 s (0,17 Hz).
 4. Byte-volgorde: gelijk aan `byte_order` in `udp_format.json`. Staat deze verkeerd, dan komen
    er onzinwaarden binnen en staan digitale signalen op de verkeerde bit.
-5. Zet de signalen op de offsets uit de tabel; `compensation_active` als digitaal signaal op adres
-   24, bit 0. De telegramlengte moet `packet_bytes` zijn.
+5. Zet de signalen op de offsets uit de tabel; `system_mode` als geheel getal (DWORD) op adres 24.
+   De telegramlengte moet `packet_bytes` zijn.
 
 ibaPDA schrijft uitgeschakelde signalen als 0 in het telegram: een uitgeschakeld signaal is dus niet
 te onderscheiden van een echte nul.

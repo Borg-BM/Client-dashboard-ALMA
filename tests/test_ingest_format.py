@@ -758,9 +758,11 @@ def test_float_types_with_scale_and_bias_round_trip_approximately(type_name, sca
 
 
 ALMA_VALUES = {
-    "compensation_active": 1.0,
-    "pressure_bore": 123.5,
-    "pressure_rod": 40.25,
+    "system_mode": 3.0,
+    "pressure_bore_skid1": 123.5,
+    "pressure_rod_skid1": 40.25,
+    "pressure_bore_skid2": 98.25,
+    "pressure_rod_skid2": 55.5,
     "tower_x": 1.2345678901234,
     "tower_y": -3.5,
     "vessel_x": 100.25,
@@ -772,18 +774,20 @@ def alma_definition(order: str) -> dict:
     """Een telegram zoals het er op de BM010 uit kan zien: header, gemengde types, een bit en een controlewoord."""
     return {
         "byte_order": order,
-        "packet_bytes": 44,
+        "packet_bytes": 52,
         "header_bytes": 4,
         "fields": [
-            {"signal": "compensation_active", "offset": 0, "type": "DWORD", "bit": 0},
-            {"signal": "pressure_bore", "offset": 4, "type": "FLOAT", "min": 0, "max": 400},
-            {"signal": "pressure_rod", "offset": 8, "type": "INT", "scale": 0.01},
-            {"signal": "tower_x", "offset": 12, "type": "DOUBLE"},
-            {"signal": "tower_y", "offset": 20, "type": "DINT", "scale": 0.001},
-            {"signal": "vessel_x", "offset": 24, "type": "FLOAT", "bias": 10.0},
-            {"signal": "vessel_y", "offset": 28, "type": "LINT", "scale": 0.1},
+            {"signal": "system_mode", "offset": 0, "type": "DWORD", "min": 0, "max": 255},
+            {"signal": "pressure_bore_skid1", "offset": 4, "type": "FLOAT", "min": 0, "max": 400},
+            {"signal": "pressure_rod_skid1", "offset": 8, "type": "INT", "scale": 0.01},
+            {"signal": "pressure_bore_skid2", "offset": 12, "type": "FLOAT"},
+            {"signal": "pressure_rod_skid2", "offset": 16, "type": "DINT", "scale": 0.001},
+            {"signal": "tower_x", "offset": 20, "type": "DOUBLE"},
+            {"signal": "tower_y", "offset": 28, "type": "DINT", "scale": 0.001},
+            {"signal": "vessel_x", "offset": 32, "type": "FLOAT", "bias": 10.0},
+            {"signal": "vessel_y", "offset": 36, "type": "LINT", "scale": 0.1},
         ],
-        "checks": [{"offset": 36, "type": "DWORD", "equals": 0xCAFEBABE}],
+        "checks": [{"offset": 44, "type": "DWORD", "equals": 0xCAFEBABE}],
         "timestamp": {"source": "receive"},
     }
 
@@ -791,10 +795,13 @@ def alma_definition(order: str) -> dict:
 @pytest.mark.parametrize("order", ORDERS)
 def test_a_realistic_telegram_has_the_documented_layout_and_round_trips(order):
     fmt = PacketFormat.from_dict(alma_definition(order), required_signals=SIGNALS)
-    # De indeling met de hand uitgeschreven: 4 header, DWORD, FLOAT, INT, 2 leeg, DOUBLE, DINT, FLOAT, LINT, DWORD
+    # De indeling met de hand uitgeschreven: 4 header, DWORD, FLOAT, INT, 2 leeg, FLOAT, DINT, DOUBLE, DINT, FLOAT,
+    # LINT, DWORD
     prefix = ">" if order == "big" else "<"
-    expected = struct.pack(prefix + "4xIfh2xdifqI", 1, 123.5, 4025, 1.2345678901234, -3500, 90.25, -2505, 0xCAFEBABE)
-    assert len(expected) == 44
+    expected = struct.pack(
+        prefix + "4xIfh2xfidifqI", 3, 123.5, 4025, 98.25, 55500, 1.2345678901234, -3500, 90.25, -2505, 0xCAFEBABE
+    )
+    assert len(expected) == 52
     packet = fmt.encode(ALMA_VALUES)
     assert packet == expected
     decoded = fmt.decode(packet)
@@ -1277,11 +1284,11 @@ def test_without_required_signals_any_signal_names_are_fine():
 def test_required_signals_for_the_alma_signals():
     assert PacketFormat.from_dict(alma_definition("big"), required_signals=SIGNALS).signals == tuple(SIGNALS)
     data = alma_definition("big")
-    data["fields"][1]["signal"] = "pressure_bor"  # een typefout
+    data["fields"][1]["signal"] = "pressure_bore_skid"  # een typefout
     message = format_error(data, required_signals=SIGNALS)
-    assert "ontbrekend: pressure_bore" in message and "onbekend: pressure_bor" in message
+    assert "ontbrekend: pressure_bore_skid1" in message and "onbekend: pressure_bore_skid" in message
     del data["fields"][1]
-    assert "ontbrekend: pressure_bore" in format_error(data, required_signals=SIGNALS)
+    assert "ontbrekend: pressure_bore_skid1" in format_error(data, required_signals=SIGNALS)
 
 
 # ---- load ------------------------------------------------------------------------------------------------

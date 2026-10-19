@@ -1,10 +1,15 @@
+from collections.abc import Collection
+
 import numpy as np
 import pandas as pd
 
-from alma.config import CylinderGeometry
+from alma.config import DEFAULT_COMPENSATING_MODES, SKIDS, CylinderGeometry
 
 BAR_M2_TO_KN = 100.0  # 1 bar * 1 m2 = 1e5 N = 100 kN
 MOTION_COLUMNS = ["tower_x", "tower_y", "vessel_x", "vessel_y"]
+# Kolommen die een toestand of modus zijn: bij inkrimpen telt het maximum, zodat een korte periode blijft staan
+# en er geen gemiddelde van modenummers ontstaat.
+FLAG_COLUMNS = ("compensation_active", "system_mode")
 
 
 def cylinder_force_kn(p_bore: pd.Series, p_rod: pd.Series, geo: CylinderGeometry) -> pd.Series:
@@ -55,16 +60,25 @@ def motion_baseline(df: pd.DataFrame) -> dict[str, float]:
     return {c: float(df[c].mean()) for c in MOTION_COLUMNS}
 
 
-def add_derived(df: pd.DataFrame, geo: CylinderGeometry, baseline: dict[str, float] | None = None) -> pd.DataFrame:
-    """Voeg kabelspanning en afwijkingen toe. De afwijking is positie minus het gemiddelde
-    (standaard het gemiddelde over df zelf; geef baseline mee om een ander nulpunt te gebruiken)."""
+def add_derived(
+    df: pd.DataFrame,
+    geo: CylinderGeometry,
+    baseline: dict[str, float] | None = None,
+    compensating: Collection[int] = DEFAULT_COMPENSATING_MODES,
+) -> pd.DataFrame:
+    """Voeg kabelspanning per skid, de compensatievlag en afwijkingen toe. De afwijking is positie minus het
+    gemiddelde (standaard het gemiddelde over df zelf; geef baseline mee om een ander nulpunt te gebruiken).
+    compensation_active is 1 in de modi van `compensating` (modenummers uit system_mode)."""
     out = df.copy()
     base = baseline or motion_baseline(df)
     for column in MOTION_COLUMNS:
         out[column] = out[column] - base[column]
     out["tower_dev"] = np.hypot(out["tower_x"], out["tower_y"])
-    out["force_kn"] = cylinder_force_kn(out["pressure_bore"], out["pressure_rod"], geo)
-    out["tension_kn"] = cable_tension_kn(out["pressure_bore"], out["pressure_rod"], geo)
+    out["compensation_active"] = np.isin(np.rint(out["system_mode"]), list(compensating)).astype(float)
+    for n in SKIDS:
+        bore, rod = out[f"pressure_bore_skid{n}"], out[f"pressure_rod_skid{n}"]
+        out[f"force_skid{n}_kn"] = cylinder_force_kn(bore, rod, geo)
+        out[f"tension_skid{n}_kn"] = cable_tension_kn(bore, rod, geo)
     return out
 
 
@@ -73,7 +87,7 @@ def decimate(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
 
     Elke bucket geeft twee punten (minimum en maximum), zodat een snel oscillerend signaal over
     een lange periode als een band zichtbaar blijft en niet door grof samplen verdwijnt (aliasing).
-    De compensatie-vlag neemt per bucket het maximum, dus een korte aan-periode gaat niet verloren.
+    De vlag- en modekolommen (FLAG_COLUMNS) nemen per bucket het maximum, dus een korte aan-periode gaat niet verloren.
     """
     if len(df) <= max_points:
         return df
@@ -89,7 +103,9 @@ def decimate(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
     for stamps, values in ((starts, lows), (mids, highs)):
         part = values.copy()
         part.index = stamps
-        part["compensation_active"] = highs["compensation_active"].to_numpy()
+        for column in FLAG_COLUMNS:
+            if column in part:
+                part[column] = highs[column].to_numpy()
         parts.append(part)
     return pd.concat(parts).sort_index(kind="stable")
 
@@ -105,7 +121,14 @@ def overview(df: pd.DataFrame) -> dict:
     if rms_off and rms_on is not None:
         reduction = 100 * (1 - rms_on / rms_off)
 
-    tension = on["tension_kn"] if len(on) else None
+    skids = {}
+    for n in SKIDS:
+        tension = on[f"tension_skid{n}_kn"] if len(on) else None
+        skids[str(n)] = {
+            "tension_mean_kn": float(tension.mean()) if tension is not None else None,
+            "tension_peak_kn": float(tension.max()) if tension is not None else None,
+            "tension_amplitude_kn": float((tension.max() - tension.min()) / 2) if tension is not None else None,
+        }
     return {
         "samples": len(df),
         "active_fraction": float(active.mean()) if len(df) else None,
@@ -113,7 +136,5 @@ def overview(df: pd.DataFrame) -> dict:
         "tower_rms_compensation_off_mm": rms_off,
         "tower_rms_compensation_on_mm": rms_on,
         "reduction_percent": reduction,
-        "tension_mean_kn": float(tension.mean()) if tension is not None else None,
-        "tension_peak_kn": float(tension.max()) if tension is not None else None,
-        "tension_amplitude_kn": float((tension.max() - tension.min()) / 2) if tension is not None else None,
+        "skids": skids,  # spanning per skid, alleen over de periode met compensatie aan
     }

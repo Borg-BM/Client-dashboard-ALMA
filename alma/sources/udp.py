@@ -23,8 +23,9 @@ from alma.ingest.format import PacketFormat
 from alma.ingest.linkquality import estimate_loss_percent
 from alma.ingest.receiver import UdpReceiver
 
-# 0/1-signalen: bij het inkrimpen van een venster telt het maximum, zodat een korte aan-periode blijft staan.
-FLAG_SIGNALS = ("compensation_active",)
+# Modenummer: bij het inkrimpen van een venster telt het maximum, zodat een korte periode blijft staan en er geen
+# gemiddelde van modenummers ontstaat.
+FLAG_SIGNALS = ("system_mode",)
 
 LOSS_WINDOW_S = 60  # over welke terugblik het verlies wordt geschat
 
