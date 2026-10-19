@@ -19,11 +19,10 @@ services:
       # zit in een VPN met de server, dus zet ALMA_UDP_PUBLISH op het IP van de server in die tunnel. Publiceer
       # deze poort nooit op een publiek adres. Zelfde poortnummer binnen en buiten de container.
       - "${ALMA_UDP_PUBLISH:-127.0.0.1}:${ALMA_UDP_PORT:-5005}:${ALMA_UDP_PORT:-5005}/udp"
-    volumes:
-      # ibaHD quick-connect.json (alleen nodig bij ALMA_SOURCE=ibahd), de signaalmap en het UDP-telegramformaat.
-      - ./secrets:/app/secrets:ro
-      - ./signals.json:/app/signals.json:ro
-      - ./udp_format.json:/app/udp_format.json:ro
+    # De bind-mounts van secrets/, signals.json en udp_format.json staan in docker-compose.override.yml
+    # (docker compose leest die automatisch). Portainer gebruikt alleen dit bestand: relatieve paden
+    # bestaan daar niet op de host en zouden als lege mappen worden aangemaakt. De image bevat dezelfde
+    # standaardbestanden.
     # De app schrijft niets naar schijf: het bestandssysteem kan dus read-only.
     read_only: true
     tmpfs:

@@ -1,0 +1,9 @@
+# Wordt door `docker compose` automatisch samengevoegd met docker-compose.yml. Portainer leest dit
+# bestand niet: daar gelden de standaardbestanden uit de image.
+services:
+  alma:
+    volumes:
+      # ibaHD quick-connect.json (alleen nodig bij ALMA_SOURCE=ibahd), de signaalmap en het UDP-telegramformaat.
+      - ./secrets:/app/secrets:ro
+      - ./signals.json:/app/signals.json:ro
+      - ./udp_format.json:/app/udp_format.json:ro
