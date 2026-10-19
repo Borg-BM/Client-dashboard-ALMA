@@ -1,0 +1,28 @@
+services:
+  alma:
+    build: .
+    image: alma-dashboard:local
+    restart: unless-stopped
+    # Alle instellingen staan in .env (kopieer .env.example); die file staat bewust niet in git.
+    env_file: .env
+    ports:
+      # Alleen op de host zelf bereikbaar. Zet hier een reverse proxy met TLS voor
+      # (zie README); publiceer deze poort nooit rechtstreeks op internet.
+      - "127.0.0.1:8000:8000"
+      # UDP-telegrammen van iba (alleen nodig bij ALMA_SOURCE=udp). Standaard alleen op localhost: de ibaPDA
+      # zit in een VPN met de server, dus zet ALMA_UDP_PUBLISH op het IP van de server in die tunnel. Publiceer
+      # deze poort nooit op een publiek adres. Zelfde poortnummer binnen en buiten de container.
+      - "${ALMA_UDP_PUBLISH:-127.0.0.1}:${ALMA_UDP_PORT:-5005}:${ALMA_UDP_PORT:-5005}/udp"
+    volumes:
+      # ibaHD quick-connect.json (alleen nodig bij ALMA_SOURCE=ibahd), de signaalmap en het UDP-telegramformaat.
+      - ./secrets:/app/secrets:ro
+      - ./signals.json:/app/signals.json:ro
+      - ./udp_format.json:/app/udp_format.json:ro
+    # De app schrijft niets naar schijf: het bestandssysteem kan dus read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

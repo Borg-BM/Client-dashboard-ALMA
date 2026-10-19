@@ -1,0 +1,107 @@
+/* Tokens: kleuren van de dataviz-richtlijn (gevalideerd) + het Barge Master-merk (navy/cyaan). */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --text: #0b0b0b; --text-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6; --series-2: #eb6834;       /* X en Y */
+  --shade: rgba(12, 163, 12, 0.14);               /* compensation aan */
+  --dot: #051541;                                  /* BM navy */
+  --on: #0ca30c; --off: #d03b3b; --nodata: #6b6a66; --warn: #ec835a; --warn-text: #b3441a;
+  --warn-bg: #fff4e5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5; --series-2: #d95926;
+    --shade: rgba(12, 163, 12, 0.20);
+    --dot: #28ace2;                                /* BM cyaan */
+    --warn-text: #fb923c; --warn-bg: #2b1d10;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; padding: 12px; background: var(--page); color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (min-width: 700px) { body { padding: 20px; } }
+
+/* Kopbalk: altijd licht, zodat het (donkere) logo ook in dark mode leesbaar blijft */
+.topbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  background: #fff; color: #0b0b0b; border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 14px; margin-bottom: 12px;
+}
+.logo { height: 40px; width: auto; display: block; }
+@media (min-width: 700px) { .logo { height: 54px; } }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.label { color: #52514e; font-size: 12px; }
+select, button {
+  background: #fff; color: #0b0b0b; border: 1px solid #c3c2b7; border-radius: 6px;
+  padding: 6px 10px; font: inherit;
+}
+button { cursor: pointer; }
+button:hover, select:hover { border-color: #051541; }
+.user { display: flex; align-items: center; gap: 8px; margin: 0; }
+#user-name { font-weight: 600; }
+
+/* Compensatiebalk: kleur + icoon + tekst, dus nooit alleen kleur */
+.status {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  color: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;
+  font-weight: 800; letter-spacing: 0.04em; font-size: clamp(24px, 6vw, 40px);
+}
+.status--on { background: var(--on); }
+.status--off { background: var(--off); }
+.status--nodata { background: var(--nodata); }
+.status__icon { width: 1.1em; height: 1.1em; flex: none; }
+.status .i-on, .status .i-off, .status .i-none { display: none; }
+.status--on .i-on, .status--off .i-off, .status--nodata .i-none { display: inline; }
+
+.banner {
+  background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-weight: 600;
+}
+.key { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; margin: 0 2px 8px; }
+.swatch { width: 18px; height: 12px; border-radius: 2px; background: var(--shade); border: 1px solid var(--on); }
+
+/* Kwarten op een computerscherm, onder elkaar op een telefoon */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  min-width: 0;
+}
+.card h2 { font-size: 14px; margin: 0 0 8px; }
+.unit { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+.chart { min-height: 200px; }
+.chart .u-legend { font-size: 12px; color: var(--text-2); }
+.chart .u-legend .u-marker { border-radius: 2px; }
+.nodata { color: var(--muted); padding: 24px 0; text-align: center; }
+
+/* Joystick-cirkels */
+.sticks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; justify-items: center; }
+.stick { margin: 0; text-align: center; width: 100%; max-width: 240px; }
+.stick svg { width: 100%; height: auto; aspect-ratio: 1; display: block; }
+.stick .ring { fill: none; stroke: var(--axis); stroke-width: 1.5; }
+.stick .ring--mid { stroke: var(--grid); stroke-width: 1; }
+.stick .cross { stroke: var(--grid); stroke-width: 1; }
+.stick .axis { fill: var(--muted); font-size: 11px; }
+.stick .trail { fill: none; stroke: var(--dot); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.stick .trail--1 { opacity: 0.12; }
+.stick .trail--2 { opacity: 0.25; }
+.stick .trail--3 { opacity: 0.45; }
+.stick .dot { fill: var(--dot); stroke: var(--surface); stroke-width: 2; transition: transform 1s linear; }
+.stick--over .ring { stroke: var(--warn); stroke-width: 3; }
+.stick--stale svg { opacity: 0.35; }
+.stick figcaption { margin-top: 6px; color: var(--text-2); }
+.stick figcaption strong { color: var(--text); }
+.stick .value { font-weight: 600; color: var(--text); }
+.stick .scale { font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .stick .dot { transition: none; } }
+
+.footer { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
+.footer.error { color: var(--warn-text); }

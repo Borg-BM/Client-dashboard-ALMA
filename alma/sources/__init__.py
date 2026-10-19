@@ -11,4 +11,8 @@ def create_source(settings: Settings) -> DataSource:
         from alma.sources.ibahd import IbaHdSource
 
         return IbaHdSource(settings.ibahd_quick_connect, settings.signal_map)
-    raise ValueError(f"Onbekende ALMA_SOURCE: {settings.source!r} (kies 'mock' of 'ibahd')")
+    if settings.source == "udp":
+        from alma.sources.udp import UdpSource
+
+        return UdpSource.from_settings(settings)
+    raise ValueError(f"Onbekende ALMA_SOURCE: {settings.source!r} (kies 'mock', 'ibahd' of 'udp')")

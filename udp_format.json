@@ -1,0 +1,13 @@
+{
+  "byte_order": "big",
+  "packet_bytes": 28,
+  "fields": [
+    { "signal": "tower_x", "offset": 0, "type": "FLOAT" },
+    { "signal": "tower_y", "offset": 4, "type": "FLOAT" },
+    { "signal": "vessel_x", "offset": 8, "type": "FLOAT" },
+    { "signal": "vessel_y", "offset": 12, "type": "FLOAT" },
+    { "signal": "pressure_bore", "offset": 16, "type": "FLOAT" },
+    { "signal": "pressure_rod", "offset": 20, "type": "FLOAT" },
+    { "signal": "compensation_active", "offset": 24, "type": "DWORD", "bit": 0 }
+  ]
+}

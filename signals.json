@@ -1,7 +1,9 @@
 {
-  "accel_x": "<channel_id>",
-  "accel_y": "<channel_id>",
+  "compensation_active": "<channel_id>",
   "pressure_bore": "<channel_id>",
   "pressure_rod": "<channel_id>",
-  "system_active": "<channel_id>"
+  "tower_x": "<channel_id>",
+  "tower_y": "<channel_id>",
+  "vessel_x": "<channel_id>",
+  "vessel_y": "<channel_id>"
 }

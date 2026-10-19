@@ -3,49 +3,103 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>ALMA BM010 Dashboard</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
-  <style>
-    :root { --bg:#f5f7fa; --card:#fff; --text:#16202c; --muted:#5d6b7a; --line:#dde3ea; --accent:#0b6bcb; --warn:#c2410c; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#0e141b; --card:#17202a; --text:#e7edf3; --muted:#93a1b0; --line:#2a3644; --accent:#5aa9ff; --warn:#fb923c; }
-    }
-    * { box-sizing: border-box; }
-    body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; }
-    header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
-    h1 { font-size:20px; margin:0; }
-    select { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
-    .label { color:var(--muted); font-size:12px; }
-    .value { font-size:24px; font-weight:600; margin-top:4px; }
-    .unit { font-size:13px; color:var(--muted); font-weight:400; }
-    .chart h2 { font-size:14px; margin:0 0 8px; }
-    .chart { margin-bottom:12px; overflow:hidden; }
-    #status { color:var(--muted); font-size:12px; }
-    #status.error { color:var(--warn); }
-  </style>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <h1>ALMA BM010 <span class="unit">oscillatiedemping</span></h1>
-    <div>
+  <header class="topbar">
+    <img class="logo" src="/assets/bm-logo.png" width="875" height="223" alt="Barge Master - Motion Compensation Solutions">
+    <div class="controls">
       <label class="label" for="minutes">Periode</label>
+      <!-- Terugval voor als /api/health niet antwoordt: app.js vervangt deze opties door wat de databron kan leveren -->
       <select id="minutes">
-        <option value="10">laatste 10 min</option>
+        <option value="10" selected>laatste 10 min</option>
         <option value="30">laatste 30 min</option>
         <option value="60">laatste 60 min</option>
       </select>
-      <span id="status"></span>
+      <form class="user" id="user" method="post" action="/auth/logout" hidden>
+        <span id="user-name"></span>
+        <button type="submit">Uitloggen</button>
+      </form>
     </div>
   </header>
 
-  <section class="grid" id="kpis"></section>
+  <div class="status status--nodata" id="status" role="status" aria-live="polite">
+    <svg class="status__icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path class="i-on" d="M7 12.5l3.2 3.2L17 8.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path class="i-off" d="M8.5 8.5l7 7M15.5 8.5l-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      <path class="i-none" d="M7.5 12h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+    <span class="status__label" id="status-label">NO DATA</span>
+  </div>
 
-  <div class="card chart"><h2>Torenversnelling (m/s²) &mdash; gearceerd = systeem aan</h2><div id="chart-accel"></div></div>
-  <div class="card chart"><h2>Geschatte kabelspanning (kN)</h2><div id="chart-tension"></div></div>
+  <div class="banner" id="demo-banner" hidden>
+    DEMO-DATA &mdash; dit dashboard toont gesimuleerde gegevens, geen metingen van de BM010.
+  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
-  <script src="app.js"></script>
+  <p class="key"><span class="swatch" aria-hidden="true"></span> Gearceerd: compensation aan</p>
+
+  <main class="grid">
+    <section class="card">
+      <h2>Kabelspanning <span class="unit">kN</span></h2>
+      <div class="chart" id="chart-tension"></div>
+    </section>
+
+    <section class="card">
+      <h2>Afwijking toren <span class="unit">mm t.o.v. gemiddelde</span></h2>
+      <div class="chart" id="chart-tower"></div>
+    </section>
+
+    <section class="card">
+      <h2>Afwijking schip <span class="unit">mm t.o.v. gemiddelde</span></h2>
+      <div class="chart" id="chart-vessel"></div>
+    </section>
+
+    <section class="card">
+      <h2>Positie nu <span class="unit">afwijking en richting</span></h2>
+      <div class="sticks">
+        <figure class="stick" id="stick-tower">
+          <svg viewBox="-100 -100 200 200" role="img" aria-label="Toren: geen data">
+            <circle class="ring" r="90"/>
+            <circle class="ring ring--mid" r="45"/>
+            <line class="cross" x1="-90" y1="0" x2="90" y2="0"/>
+            <line class="cross" x1="0" y1="-90" x2="0" y2="90"/>
+            <text class="axis" x="84" y="-5" text-anchor="end">X</text>
+            <text class="axis" x="5" y="-79">Y</text>
+            <polyline class="trail trail--1" points=""/>
+            <polyline class="trail trail--2" points=""/>
+            <polyline class="trail trail--3" points=""/>
+            <circle class="dot" r="8"/>
+          </svg>
+          <figcaption><strong>Toren</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
+        </figure>
+
+        <figure class="stick" id="stick-vessel">
+          <svg viewBox="-100 -100 200 200" role="img" aria-label="Schip: geen data">
+            <circle class="ring" r="90"/>
+            <circle class="ring ring--mid" r="45"/>
+            <line class="cross" x1="-90" y1="0" x2="90" y2="0"/>
+            <line class="cross" x1="0" y1="-90" x2="0" y2="90"/>
+            <text class="axis" x="84" y="-5" text-anchor="end">X</text>
+            <text class="axis" x="5" y="-79">Y</text>
+            <polyline class="trail trail--1" points=""/>
+            <polyline class="trail trail--2" points=""/>
+            <polyline class="trail trail--3" points=""/>
+            <circle class="dot" r="8"/>
+          </svg>
+          <figcaption><strong>Schip</strong> <span class="value">&ndash;</span><br><span class="scale"></span></figcaption>
+        </figure>
+      </div>
+    </section>
+  </main>
+
+  <p class="footer" id="footer"></p>
+
+  <script src="/vendor/uplot/uPlot.iife.min.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
