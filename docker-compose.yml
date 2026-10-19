@@ -4,7 +4,13 @@ services:
     image: alma-dashboard:local
     restart: unless-stopped
     # Alle instellingen staan in .env (kopieer .env.example); die file staat bewust niet in git.
-    env_file: .env
+    # Optioneel (Compose 2.24+): in Portainer ontbreekt .env en schrijft Portainer de stackvariabelen
+    # naar stack.env naast deze file; dat bestand geeft ze door aan de container.
+    env_file:
+      - path: .env
+        required: false
+      - path: stack.env
+        required: false
     ports:
       # Alleen op de host zelf bereikbaar. Zet hier een reverse proxy met TLS voor
       # (zie README); publiceer deze poort nooit rechtstreeks op internet.
